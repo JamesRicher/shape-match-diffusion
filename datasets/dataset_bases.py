@@ -14,31 +14,43 @@ def sort_list(l):
     
 
 class ShapeCache:
-    """Lazy loader for shape data, a copy of this class is owned by a Dataset object"""
-    def __init__(self, dataset_dir: str):
-        self.dataset_dir = dataset_dir
+    """Lazy path-keyed loader for shape data, owned by a Dataset instance."""
+    def __init__(self):
         self._feats: dict = {}
         self._corres: dict = {}
         self._verts: dict = {}
         self._faces: dict = {}
         self._dists: dict = {}
+        self._ops: dict = {}
 
-    def feats(self, name: str) -> np.ndarray:
-        if name not in self._feats:
-            self._feats[name] = load_feats(name, self.dataset_dir).astype(np.float32)
-        return self._feats[name]
+    def feats(self, feat_file: str) -> np.ndarray:
+        if feat_file not in self._feats:
+            self._feats[feat_file] = load_feats(feat_file).astype(np.float32)
+        return self._feats[feat_file]
 
-    def geom(self, name: str) -> Tuple[np.ndarray, np.ndarray]:
-        if name not in self._verts:
-            v, f = load_off(name, self.dataset_dir)
-            self._verts[name] = v.astype(np.float32)
-            self._faces[name] = f.astype(np.int64)
-        return self._verts[name], self._faces[name]
+    def geom(self, off_file: str) -> Tuple[np.ndarray, np.ndarray]:
+        if off_file not in self._verts:
+            v, f = load_off(off_file)
+            self._verts[off_file] = v.astype(np.float32)
+            self._faces[off_file] = f.astype(np.int64)
+        return self._verts[off_file], self._faces[off_file]
 
-    def corres(self, name: str) -> np.ndarray:
-        if name not in self._corres:
-            self._corres[name] = load_corres(name, self.dataset_dir)
-        return self._corres[name]
+    def corres(self, corr_file: str) -> np.ndarray:
+        if corr_file not in self._corres:
+            self._corres[corr_file] = load_corres(corr_file)
+        return self._corres[corr_file]
+
+    def dist(self, dist_file: str) -> np.ndarray:
+        if dist_file not in self._dists:
+            self._dists[dist_file] = load_dist(dist_file)
+        return self._dists[dist_file]
+
+    def ops(self, off_file: str, diffusion_dir: str) -> dict:
+        key = (off_file, diffusion_dir)
+        if key not in self._ops:
+            verts, faces = self.geom(off_file)
+            self._ops[key] = load_diffusion_operators(verts, faces, diffusion_dir)
+        return self._ops[key]
 
 
 class SingleShapeDataset(Dataset):
@@ -82,6 +94,8 @@ class SingleShapeDataset(Dataset):
         self.corr_files = [] if self.ret_corr else None
         self.dist_files = [] if self.ret_dist else None
         self.feat_files = [] if self.ret_feats else None
+
+        self.cache = ShapeCache()
 
         self._init_data()
 
@@ -130,36 +144,34 @@ class SingleShapeDataset(Dataset):
         item['name'] = basename
 
         # get vertices and faces
-        verts, faces = load_off(off_file)
-        verts = verts.astype(np.float32)
-        faces = faces.astype(np.int64)
+        verts, faces = self.cache.geom(off_file)
         item['verts'] = torch.from_numpy(verts)
         if self.ret_faces:
             item['faces'] = torch.from_numpy(faces)
 
         # get geodesic distance matrix
         if self.ret_dist:
-            dist = load_dist(self.dist_files[index])
+            dist = self.cache.dist(self.dist_files[index])
             item['dist'] = torch.from_numpy(dist).float()
 
         # get correspondences
         if self.ret_corr:
-            corr = load_corres(self.corr_files[index])
+            corr = self.cache.corres(self.corr_files[index])
             item['corr'] = torch.from_numpy(corr).long()
 
         # get frozen featrues
         if self.ret_feats:
-            feat = load_feats(self.feat_files[index])
+            feat = self.cache.feats(self.feat_files[index])
             item['feat'] = torch.from_numpy(feat).float()
 
         # get spectral operators (cached by ULRSSM-style preprocess)
         if self.ret_evecs:
-            self._load_ops(item, verts, faces)
+            self._load_ops(item, off_file)
 
         return item
 
-    def _load_ops(self, item, verts_np: np.ndarray, faces_np: np.ndarray):
-        ops = load_diffusion_operators(verts_np, faces_np, self.diffusion_dir)
+    def _load_ops(self, item, off_file: str):
+        ops = self.cache.ops(off_file, self.diffusion_dir)
         assert ops['k_eig'] >= self.num_evecs, \
             f"Cache has {ops['k_eig']} evecs, requested {self.num_evecs}"
 
