@@ -10,5 +10,8 @@
   "pck_max": 0.25,
   "pck_n": 100,
   "mge": 0.018174732103943825,
-  "auc": 0.9295339584350586
+  "auc": 0.9295339584350586,
+  "geodesic_distortion_sum": 1084430.449013158,
+  "geodesic_distortion_mean": 0.043370293311186525,
+  "dirichlet_energy": 1.8659930279380397
 }
