@@ -1,7 +1,9 @@
 from datasets.dataset_bases import SingleShapeDataset, PairShapeDataset
 import os
+from utils.registry import DATASET_REGISTRY
 
 
+@DATASET_REGISTRY.register()
 class SingleFaustDataset(SingleShapeDataset):
     """
     FAUST_r dataset one at a time
@@ -12,7 +14,7 @@ class SingleFaustDataset(SingleShapeDataset):
 
     def __init__(self, 
                  data_root, 
-                 phase: str, 
+                 phase: str = "train", 
                  ret_faces = True, 
                  ret_feats = True, 
                  ret_corr = True, 
@@ -42,6 +44,7 @@ class SingleFaustDataset(SingleShapeDataset):
             self._size = 20
 
 
+@DATASET_REGISTRY.register()
 class SingleSmalDataset(SingleShapeDataset):
     """
     SMAL_r dataset one at a time
@@ -63,6 +66,8 @@ class SingleSmalDataset(SingleShapeDataset):
         self.category = category
         super(SingleSmalDataset, self).__init__(data_root, ret_faces, ret_feats, ret_corr, ret_dist)
 
+        self.flip_up = True
+
 
     def _init_data(self):
         if self.category:
@@ -82,10 +87,11 @@ class SingleSmalDataset(SingleShapeDataset):
                     self.feat_files += [os.path.join(self.data_root, 'feats', f'{line}.npy')]
 
 
+@DATASET_REGISTRY.register()
 class SingleScapeDataset(SingleShapeDataset):
     def __init__(self, 
                  data_root,
-                 phase, 
+                 phase="train", 
                  ret_faces=True,
                  ret_feats=True,
                  ret_corr=True,
@@ -111,10 +117,11 @@ class SingleScapeDataset(SingleShapeDataset):
             self._size = 20
 
 
+@DATASET_REGISTRY.register()
 class PairFaustDataset(PairShapeDataset):
     def __init__(self, 
                  data_root,
-                 phase, 
+                 phase="train", 
                  ret_faces=True,
                  ret_feats=True,
                  ret_corr=True, 
@@ -123,6 +130,7 @@ class PairFaustDataset(PairShapeDataset):
         super().__init__(dataset)
 
 
+@DATASET_REGISTRY.register()
 class PairSmalDataset(PairShapeDataset):
     def __init__(self,
                  data_root,
@@ -136,6 +144,7 @@ class PairSmalDataset(PairShapeDataset):
         super().__init__(dataset=dataset)
 
 
+@DATASET_REGISTRY.register()
 class PairScapeDataset(PairShapeDataset):
     def __init__(self,
                  data_root,

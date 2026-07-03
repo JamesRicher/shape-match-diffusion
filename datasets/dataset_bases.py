@@ -85,6 +85,9 @@ class SingleShapeDataset(Dataset):
         if self.ret_feats:
             assert self._size == len(self.feat_files)
 
+        # polyscope settings
+        self.flip_up = False
+
     
     def _init_data(self):
         off_path = os.path.join(self.data_root, 'off')
@@ -154,6 +157,8 @@ class PairShapeDataset(Dataset):
         assert isinstance(dataset, SingleShapeDataset), f'Invalid input data type of dataset: {type(dataset)}'
         self.dataset = dataset
         self.combinations = list(product(range(len(dataset)), repeat=2))
+
+        self.flip_up = self.dataset.flip_up
 
     def __getitem__(self, index):
         # get index
