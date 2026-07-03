@@ -3,10 +3,9 @@ import numpy as np
 import torch
 import polyscope as ps
 from utils.data_utils import load_off
+from paths import SMAL_DIR
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-SMAL_DIR = os.path.normpath(os.path.join(HERE, "..", "..", "data", "SMAL_r"))
-FEATS_DIR = os.path.normpath(os.path.join(SMAL_DIR, "feats_norm"))
+FEATS_DIR = os.path.join(SMAL_DIR, "feats_norm")
 
 shape_a = "horse_01"
 shape_b = "horse_02"

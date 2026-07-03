@@ -51,12 +51,16 @@ class SingleShapeDataset(Dataset):
         ret_feats (bool): whether to return feats
         ret_corr (bool): whether to return GT correspondence
         ret_dist (bool): whether to return distances
+        ret_evecs (bool): whether to return LBO spectral operators (evecs, evals, mass, L, gradX, gradY)
+        num_evecs (int): number of eigenvectors to load when ret_evecs is True
     """
-    def __init__(self, data_root: str, 
+    def __init__(self, data_root: str,
                  ret_faces: bool=True,
-                 ret_feats: bool=True, 
-                 ret_corr: bool=True, 
-                 ret_dist: bool=True):
+                 ret_feats: bool=True,
+                 ret_corr: bool=True,
+                 ret_dist: bool=True,
+                 ret_evecs: bool=False,
+                 num_evecs: int=200):
         super().__init__()
         assert os.path.isdir(data_root), f"Invalid data root for SingleShapeDataset: {data_root}"
 
@@ -66,6 +70,13 @@ class SingleShapeDataset(Dataset):
         self.ret_feats = ret_feats
         self.ret_corr = ret_corr
         self.ret_dist = ret_dist
+        self.ret_evecs = ret_evecs
+        self.num_evecs = num_evecs
+        self.diffusion_dir = os.path.join(data_root, 'diffusion') if ret_evecs else None
+
+        if self.ret_evecs:
+            assert os.path.isdir(self.diffusion_dir), \
+                f"Invalid path {self.diffusion_dir} not containing cached diffusion operators"
 
         self.off_files = []
         self.corr_files = [] if self.ret_corr else None
@@ -120,9 +131,11 @@ class SingleShapeDataset(Dataset):
 
         # get vertices and faces
         verts, faces = load_off(off_file)
-        item['verts'] = torch.from_numpy(verts).float()
+        verts = verts.astype(np.float32)
+        faces = faces.astype(np.int64)
+        item['verts'] = torch.from_numpy(verts)
         if self.ret_faces:
-            item['faces'] = torch.from_numpy(faces).long()
+            item['faces'] = torch.from_numpy(faces)
 
         # get geodesic distance matrix
         if self.ret_dist:
@@ -139,7 +152,29 @@ class SingleShapeDataset(Dataset):
             feat = load_feats(self.feat_files[index])
             item['feat'] = torch.from_numpy(feat).float()
 
+        # get spectral operators (cached by ULRSSM-style preprocess)
+        if self.ret_evecs:
+            self._load_ops(item, verts, faces)
+
         return item
+
+    def _load_ops(self, item, verts_np: np.ndarray, faces_np: np.ndarray):
+        ops = load_diffusion_operators(verts_np, faces_np, self.diffusion_dir)
+        assert ops['k_eig'] >= self.num_evecs, \
+            f"Cache has {ops['k_eig']} evecs, requested {self.num_evecs}"
+
+        k = self.num_evecs
+        evecs = ops['evecs'][:, :k]
+        evals = ops['evals'][:k]
+        mass = ops['mass']
+
+        item['evecs'] = torch.from_numpy(evecs).float()
+        item['evecs_trans'] = torch.from_numpy(evecs.T * mass[None]).float()
+        item['evals'] = torch.from_numpy(evals).float()
+        item['mass'] = torch.from_numpy(mass).float()
+        item['L'] = sparse_np_to_torch(ops['L'])
+        item['gradX'] = sparse_np_to_torch(ops['gradX'])
+        item['gradY'] = sparse_np_to_torch(ops['gradY'])
 
 
     def __len__(self):

@@ -1,0 +1,14 @@
+{
+  "dataset": "SMAL_r",
+  "dataset_opts": {
+    "name": "Smal_r",
+    "type": "PairSmalDataset",
+    "phase": "test"
+  },
+  "num_pairs": 400,
+  "num_correspondences": 1477820,
+  "pck_max": 0.25,
+  "pck_n": 100,
+  "mge": 0.07471645623445511,
+  "auc": 0.7950471043586731
+}

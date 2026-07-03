@@ -12,14 +12,16 @@ class SingleFaustDataset(SingleShapeDataset):
         phase (str): one of test train or full
     """
 
-    def __init__(self, 
-                 data_root, 
-                 phase: str = "train", 
-                 ret_faces = True, 
-                 ret_feats = True, 
-                 ret_corr = True, 
-                 ret_dist = True):
-        super().__init__(data_root, ret_faces, ret_feats, ret_corr, ret_dist)
+    def __init__(self,
+                 data_root,
+                 phase: str = "train",
+                 ret_faces=True,
+                 ret_feats=True,
+                 ret_corr=True,
+                 ret_dist=True,
+                 ret_evecs=False,
+                 num_evecs=200):
+        super().__init__(data_root, ret_faces, ret_feats, ret_corr, ret_dist, ret_evecs, num_evecs)
         assert phase in ['train', 'test', 'full'], f'Invalid phase {phase}, only "train" or "test" or "full"'
         assert len(self) == 100, f'FAUST dataset should contain 100 human body shapes, but get {len(self)}.'
         if phase == 'train':
@@ -53,18 +55,20 @@ class SingleSmalDataset(SingleShapeDataset):
         phase (str): one of test train or full
         category (bool):
     """
-    def __init__(self, 
-                 data_root, 
-                 phase='train', 
+    def __init__(self,
+                 data_root,
+                 phase='train',
                  category=True,
                  ret_faces=True,
                  ret_feats=True,
-                 ret_corr=True, 
-                 ret_dist=True):
+                 ret_corr=True,
+                 ret_dist=True,
+                 ret_evecs=False,
+                 num_evecs=200):
         assert phase in ['train', 'test', 'full'], f'Invalid phase {phase}, only "train" or "test" or "full"'
         self.phase = phase
         self.category = category
-        super(SingleSmalDataset, self).__init__(data_root, ret_faces, ret_feats, ret_corr, ret_dist)
+        super(SingleSmalDataset, self).__init__(data_root, ret_faces, ret_feats, ret_corr, ret_dist, ret_evecs, num_evecs)
 
         self.flip_up = True
 
@@ -89,14 +93,16 @@ class SingleSmalDataset(SingleShapeDataset):
 
 @DATASET_REGISTRY.register()
 class SingleScapeDataset(SingleShapeDataset):
-    def __init__(self, 
+    def __init__(self,
                  data_root,
-                 phase="train", 
+                 phase="train",
                  ret_faces=True,
                  ret_feats=True,
                  ret_corr=True,
-                 ret_dist=True):
-        super(SingleScapeDataset, self).__init__(data_root, ret_faces, ret_feats, ret_corr, ret_dist)
+                 ret_dist=True,
+                 ret_evecs=False,
+                 num_evecs=200):
+        super(SingleScapeDataset, self).__init__(data_root, ret_faces, ret_feats, ret_corr, ret_dist, ret_evecs, num_evecs)
         assert phase in ['train', 'test', 'full'], f'Invalid phase {phase}, only "train" or "test" or "full"'
         assert len(self) == 71, f'FAUST dataset should contain 71 human body shapes, but get {len(self)}.'
         if phase == 'train':
@@ -106,6 +112,8 @@ class SingleScapeDataset(SingleShapeDataset):
                 self.corr_files = self.corr_files[:51]
             if self.dist_files:
                 self.dist_files = self.dist_files[:51]
+            if self.feat_files:
+                self.feat_files = self.feat_files[:51]
             self._size = 51
         elif phase == 'test':
             if self.off_files:
@@ -114,19 +122,23 @@ class SingleScapeDataset(SingleShapeDataset):
                 self.corr_files = self.corr_files[51:]
             if self.dist_files:
                 self.dist_files = self.dist_files[51:]
+            if self.feat_files:
+                self.feat_files = self.feat_files[51:]
             self._size = 20
 
 
 @DATASET_REGISTRY.register()
 class PairFaustDataset(PairShapeDataset):
-    def __init__(self, 
+    def __init__(self,
                  data_root,
-                 phase="train", 
+                 phase="train",
                  ret_faces=True,
                  ret_feats=True,
-                 ret_corr=True, 
-                 ret_dist=True):
-        dataset = SingleFaustDataset(data_root, phase, ret_faces, ret_feats, ret_corr, ret_dist)
+                 ret_corr=True,
+                 ret_dist=True,
+                 ret_evecs=False,
+                 num_evecs=200):
+        dataset = SingleFaustDataset(data_root, phase, ret_faces, ret_feats, ret_corr, ret_dist, ret_evecs, num_evecs)
         super().__init__(dataset)
 
 
@@ -135,12 +147,14 @@ class PairSmalDataset(PairShapeDataset):
     def __init__(self,
                  data_root,
                  phase='train',
-                 category=True, 
+                 category=True,
                  ret_faces=True,
                  ret_feats=True,
-                 ret_corr=True, 
-                 ret_dist=True):
-        dataset = SingleSmalDataset(data_root, phase, category, ret_faces, ret_feats, ret_corr, ret_dist)
+                 ret_corr=True,
+                 ret_dist=True,
+                 ret_evecs=False,
+                 num_evecs=200):
+        dataset = SingleSmalDataset(data_root, phase, category, ret_faces, ret_feats, ret_corr, ret_dist, ret_evecs, num_evecs)
         super().__init__(dataset=dataset)
 
 
@@ -151,7 +165,9 @@ class PairScapeDataset(PairShapeDataset):
                  phase='train',
                  ret_faces=True,
                  ret_feats=True,
-                 ret_corr=True, 
-                 ret_dist=True):
-        dataset = SingleScapeDataset(data_root, phase, ret_faces, ret_feats, ret_corr, ret_dist)
+                 ret_corr=True,
+                 ret_dist=True,
+                 ret_evecs=False,
+                 num_evecs=200):
+        dataset = SingleScapeDataset(data_root, phase, ret_faces, ret_feats, ret_corr, ret_dist, ret_evecs, num_evecs)
         super().__init__(dataset)

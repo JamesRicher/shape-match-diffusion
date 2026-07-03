@@ -1,15 +1,12 @@
 from datasets.shape_datasets import *
 import polyscope as ps
-import os
 import numpy as np
+
+from paths import FAUST_DIR as faust_root, SMAL_DIR as smal_root, SCAPE_DIR as scape_root
 
 k = 10
 
 ps.init()
-HERE = os.path.dirname(os.path.abspath(__file__))
-faust_root = os.path.join(HERE, '..','..','..',"data", "FAUST_r")
-smal_root = os.path.join(HERE, '..','..','..',"data", "SMAL_r")
-scape_root = os.path.join(HERE, '..','..','..',"data", "SCAPE_r")
 
 faust_dataset = SingleFaustDataset(data_root=faust_root, phase="full")
 item = faust_dataset.__getitem__(90)

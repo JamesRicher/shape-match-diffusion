@@ -1,21 +1,12 @@
-from os import path as osp
 from copy import deepcopy
 import torch
 from utils.registry import DATASET_REGISTRY
+from paths import DEFAULT_DATA_ROOTS
 
 # make the registry decorators run
 import datasets.shape_datasets
 
 __all__ = ["build_dataset"]
-
-HERE = osp.dirname(osp.abspath(__file__))
-DATA_ROOT = osp.join(HERE, '..', '..', '..', "data")
-
-DEFAULT_DATA_ROOTS = {
-    "Faust_r": osp.join(DATA_ROOT, "FAUST_r"),
-    "Smal_r": osp.join(DATA_ROOT, "SMAL_r"),
-    "Scape_r": osp.join(DATA_ROOT, "SCAPE_r"),
-}
 
 def build_dataset(dataset_opt):
     """

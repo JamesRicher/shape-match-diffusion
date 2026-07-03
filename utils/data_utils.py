@@ -1,14 +1,13 @@
 import os
+import hashlib
 import numpy as np
 from typing import Tuple
-import scipy.io 
+import scipy.io
+import scipy.sparse
 
-# DATA PATHS
-_HERE = os.path.dirname(os.path.abspath(__file__))
+from paths import FAUST_DIR as DEFAULT_DATASET_DIR
+
 DEFAULT_DATASET = "FAUST_r"
-DEFAULT_DATASET_DIR = os.path.normpath(
-    os.path.join(_HERE, "..", "..", "data", DEFAULT_DATASET)
-)
 
 def _dataset_paths(dataset_dir: str = DEFAULT_DATASET_DIR):
     return {
@@ -44,6 +43,64 @@ def load_off(off_file: str) -> Tuple[np.ndarray, np.ndarray]:
 def load_dist(dist_file: str) -> np.ndarray:
     assert os.path.isfile(dist_file), f"Invalid .mat file: {dist_file}"
     return scipy.io.loadmat(dist_file)["dist"]
+
+
+def _hash_arrays(*arrs) -> str:
+    h = hashlib.sha1()
+    for a in arrs:
+        h.update(np.ascontiguousarray(a).tobytes())
+    return h.hexdigest()
+
+
+def load_diffusion_operators(verts_np: np.ndarray, faces_np: np.ndarray, cache_dir: str):
+    """Loads DiffusionNet-style cached spectral operators for a shape, matching by
+    SHA1 hash over (verts, faces) with linear probing on collisions.
+
+    Hashing convention matches ULRSSM's `utils.geometry_util.get_operators`: SHA1
+    over float32 verts bytes concatenated with int64 faces bytes.
+
+    Returns dict with keys L, mass, evals, evecs, gradX, gradY, k_eig where L,
+    gradX, gradY are scipy.sparse.csc_matrix and the rest are np.ndarray."""
+    assert os.path.isdir(cache_dir), f"Missing diffusion cache dir: {cache_dir}"
+    verts_np = verts_np.astype(np.float32, copy=False)
+    faces_np = faces_np.astype(np.int64, copy=False)
+    key = _hash_arrays(verts_np, faces_np)
+
+    def _read_sp(npz, prefix):
+        return scipy.sparse.csc_matrix(
+            (npz[f"{prefix}_data"], npz[f"{prefix}_indices"], npz[f"{prefix}_indptr"]),
+            shape=tuple(npz[f"{prefix}_shape"]),
+        )
+
+    i = 0
+    while True:
+        path = os.path.join(cache_dir, f"{key}_{i}.npz")
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"No cached operators for hash {key} in {cache_dir}")
+        npz = np.load(path, allow_pickle=True)
+        if np.array_equal(verts_np, npz["verts"]) and np.array_equal(faces_np, npz["faces"]):
+            return {
+                "L": _read_sp(npz, "L"),
+                "mass": npz["mass"],
+                "evals": npz["evals"],
+                "evecs": npz["evecs"],
+                "gradX": _read_sp(npz, "gradX"),
+                "gradY": _read_sp(npz, "gradY"),
+                "k_eig": int(npz["k_eig"].item()),
+            }
+        i += 1
+
+
+def sparse_np_to_torch(A: scipy.sparse.spmatrix) -> "torch.Tensor":
+    """scipy sparse -> torch sparse_coo tensor (float32). Matches ULRSSM helper."""
+    import torch
+    Acoo = A.tocoo()
+    indices = np.vstack((Acoo.row, Acoo.col))
+    return torch.sparse_coo_tensor(
+        torch.from_numpy(indices).long(),
+        torch.from_numpy(Acoo.data).float(),
+        torch.Size(Acoo.shape),
+    ).coalesce()
 
 
 def fps(pool, n: int, start: int):

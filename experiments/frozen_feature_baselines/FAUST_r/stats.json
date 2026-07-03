@@ -1,0 +1,14 @@
+{
+  "dataset": "FAUST_r",
+  "dataset_opts": {
+    "name": "Faust_r",
+    "type": "PairFaustDataset",
+    "phase": "test"
+  },
+  "num_pairs": 400,
+  "num_correspondences": 1900000,
+  "pck_max": 0.25,
+  "pck_n": 100,
+  "mge": 0.018174732103943825,
+  "auc": 0.9295339584350586
+}
