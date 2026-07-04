@@ -1,0 +1,36 @@
+# Shape-matching transformer on FAUST_r.
+# Run with:  python train.py -c configs/faust_shape_matching.yaml
+
+name: shape_matching          # experiment dir under experiments/<name>/
+model_type: ShapeMatchingModel
+is_train: true
+# device: cuda                # optional; auto-detected (cuda if available) when omitted
+
+datasets:
+  train: {name: Faust_r, type: PairFaustDataset, phase: train, ret_evecs: true}
+  val:   {name: Faust_r, type: PairFaustDataset, phase: test,  ret_evecs: true}
+
+networks:
+  encoder:
+    type: ShapeMatchingEncoder
+    in_dim: null              # auto-filled from the data at runtime
+    dim: 128
+    heads: 4
+    depth: 4
+    dropout: 0.0
+
+train:
+  total_epochs: 50
+  log_freq: 20
+  optims:
+    encoder: {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+  schedulers:
+    encoder: {type: CosineAnnealingLR, T_max: 50}
+  losses:
+    l_nce: {type: SupervisedContrastiveLoss, temperature: 0.07, loss_weight: 1.0}
+    l_dir: {type: DirichletLoss, normalize: true, loss_weight: 0.01}
+
+val:
+  metrics:
+    geo_error: {type: calculate_geodesic_error}
+    plot_pck:  {type: plot_pck}

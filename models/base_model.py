@@ -12,6 +12,7 @@ import torch.optim as optim
 
 from networks import build_network
 from metrics import build_metric
+from losses import build_loss
 from utils.logger import get_root_logger, AvgTimer
 
 
@@ -63,8 +64,8 @@ class BaseModel:
 
         # training machinery
         if self.is_train:
-            self.train()
-            self._init_training_setting()
+            self.train() # set the model mode to train() if specified
+            self._init_training_setting() # lots of things happen here
 
         # optionally resume from a checkpoint
         load_path = self.opt.get('path', {}).get('resume_state')
@@ -250,8 +251,6 @@ class BaseModel:
         if 'losses' not in train_opt:
             get_root_logger().info('No loss is registered.')
             return
-        # Lazy import: the losses package is optional until training objectives exist.
-        from losses import build_loss
         for name, loss_opt in train_opt['losses'].items():
             self.losses[name] = build_loss(loss_opt).to(self.device)
 
