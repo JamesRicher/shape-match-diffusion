@@ -20,12 +20,13 @@ networks:
     dropout: 0.0
 
 train:
-  total_epochs: 50
+  total_epochs: 15           # ULRSSM FAUST recipe
   log_freq: 20
   optims:
     encoder: {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
   schedulers:
-    encoder: {type: CosineAnnealingLR, T_max: 50}
+    # T_max is set automatically from total_epochs in train.py (do not set it here)
+    encoder: {type: CosineAnnealingLR, eta_min: 1e-4}
   losses:
     l_nce: {type: SupervisedContrastiveLoss, temperature: 0.07, loss_weight: 1.0}
     l_dir: {type: DirichletLoss, normalize: true, loss_weight: 0.01}

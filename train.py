@@ -32,6 +32,13 @@ def build_opt(args):
     if args.device is not None:
         opt['device'] = args.device
 
+    # keep the cosine schedule length tied to the run length: T_max always follows
+    # total_epochs (we step CosineAnnealingLR once per epoch), so the two can't drift.
+    total_epochs = opt['train']['total_epochs']
+    for sched_cfg in opt['train'].get('schedulers', {}).values():
+        if sched_cfg.get('type') == 'CosineAnnealingLR':
+            sched_cfg['T_max'] = total_epochs
+
     # resolve experiment output paths from the experiment name
     exp_dir = osp.join(EXPERIMENTS_ROOT, opt['name'])
     path = opt.setdefault('path', {})
