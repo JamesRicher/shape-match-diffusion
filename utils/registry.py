@@ -74,7 +74,7 @@ class Registry:
 
 # define registries
 DATASET_REGISTRY = Registry('dataset')
-#NETWORK_REGISTRY = Registry('arch')
+NETWORK_REGISTRY = Registry('arch')
 #MODEL_REGISTRY = Registry('model')
 #LOSS_REGISTRY = Registry('loss')
 METRIC_REGISTRY = Registry('metric')
