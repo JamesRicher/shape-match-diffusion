@@ -1,4 +1,4 @@
-name: shapematch
+name: jrr25-shapematch
 channels:
   - conda-forge
 dependencies:

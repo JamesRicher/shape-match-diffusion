@@ -47,6 +47,8 @@ pyparsing==3.3.2
     # via matplotlib
 python-dateutil==2.9.0.post0
     # via matplotlib
+pyyaml==6.0.3
+    # via -r requirements.in
 scipy==1.18.0
     # via -r requirements.in
 six==1.17.0
