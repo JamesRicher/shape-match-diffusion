@@ -3,15 +3,16 @@
   "dataset_opts": {
     "name": "Scape_r",
     "type": "PairScapeDataset",
-    "phase": "test"
+    "phase": "test",
+    "ret_evecs": true
   },
   "num_pairs": 400,
   "num_correspondences": 1900000,
   "pck_max": 0.25,
   "pck_n": 100,
-  "mge": 0.021923881024122238,
-  "auc": 0.9123953580856323,
-  "geodesic_distortion_sum": 1390471.507319079,
-  "geodesic_distortion_mean": 0.055589506547211814,
-  "dirichlet_energy": 2.172813739588386
+  "mge": 0.021923882886767387,
+  "auc": 0.9123953322700692,
+  "geodesic_distortion_sum": 1390471.447944079,
+  "geodesic_distortion_mean": 0.0555895041698884,
+  "dirichlet_energy": 2.172787723729485
 }

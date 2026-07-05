@@ -3,15 +3,16 @@
   "dataset_opts": {
     "name": "Faust_r",
     "type": "PairFaustDataset",
-    "phase": "test"
+    "phase": "test",
+    "ret_evecs": true
   },
   "num_pairs": 400,
   "num_correspondences": 1900000,
   "pck_max": 0.25,
   "pck_n": 100,
   "mge": 0.018174732103943825,
-  "auc": 0.9295339584350586,
-  "geodesic_distortion_sum": 1084430.449013158,
-  "geodesic_distortion_mean": 0.043370293311186525,
-  "dirichlet_energy": 1.8659930279380397
+  "auc": 0.9295339898989898,
+  "geodesic_distortion_sum": 1084430.3334703948,
+  "geodesic_distortion_mean": 0.043370288664377046,
+  "dirichlet_energy": 1.8659912953251288
 }

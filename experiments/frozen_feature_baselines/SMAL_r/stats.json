@@ -3,15 +3,16 @@
   "dataset_opts": {
     "name": "Smal_r",
     "type": "PairSmalDataset",
-    "phase": "test"
+    "phase": "test",
+    "ret_evecs": true
   },
   "num_pairs": 400,
   "num_correspondences": 1477820,
   "pck_max": 0.25,
   "pck_n": 100,
-  "mge": 0.07471645623445511,
-  "auc": 0.7950471043586731,
-  "geodesic_distortion_sum": 2786549.747368421,
-  "geodesic_distortion_mean": 0.10251193218619416,
-  "dirichlet_energy": 38.48945815563202
+  "mge": 0.07471644133329391,
+  "auc": 0.795047178419646,
+  "geodesic_distortion_sum": 2786549.785855263,
+  "geodesic_distortion_mean": 0.10251193367140858,
+  "dirichlet_energy": 38.487923915135234
 }
