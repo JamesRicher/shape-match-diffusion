@@ -45,6 +45,23 @@ def load_dist(dist_file: str) -> np.ndarray:
     return scipy.io.loadmat(dist_file)["dist"]
 
 
+# GEOMETRY HELPERS
+def surface_area(mass):
+    """Total surface area of a mesh, read off the lumped-mass (per-vertex area) vector.
+
+    The DiffusionNet-style spectral operators expose ``mass`` as the diagonal of the
+    lumped mass matrix, whose entries sum to the mesh area. Accepts a torch tensor or
+    a numpy array and returns the same type.
+    """
+    return mass.sum()
+
+
+def sqrt_surface_area(mass):
+    """sqrt of the total surface area; the scale used to area-normalize geodesic
+    distances. See :func:`surface_area`."""
+    return surface_area(mass) ** 0.5
+
+
 def _hash_arrays(*arrs) -> str:
     h = hashlib.sha1()
     for a in arrs:

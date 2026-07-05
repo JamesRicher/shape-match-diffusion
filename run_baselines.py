@@ -11,6 +11,7 @@ from tqdm import tqdm
 from datasets import build_dataset
 from metrics import build_metric
 from paths import FROZEN_BASELINES_ROOT
+from utils.data_utils import sqrt_surface_area
 
 
 OUTPUT_ROOT = Path(FROZEN_BASELINES_ROOT)
@@ -45,11 +46,6 @@ def cosine_similarity_matrix(feat_a: torch.Tensor, feat_b: torch.Tensor) -> torc
 def nn_assignment(sim: torch.Tensor) -> torch.Tensor:
     """For each vertex in A, index of its nearest-neighbour vertex in B. Shape [V_a]."""
     return sim.argmax(dim=1)
-
-
-def sqrt_surface_area(mass: torch.Tensor) -> torch.Tensor:
-    """sqrt of total surface area, read off the lumped-mass (per-vertex area) vector."""
-    return mass.sum().sqrt()
 
 
 def parse_args():

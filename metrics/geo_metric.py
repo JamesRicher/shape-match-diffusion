@@ -9,6 +9,8 @@ _trapezoid = getattr(np, "trapezoid", getattr(np, "trapz", None))
 def calculate_geodesic_error(dist_x, corr_x, corr_y, p2p, return_mean=True):
     """
     Calculate the geodesic error between predicted correspondence and gt correspondence
+    NOTE: the errors returned are not normalised by total SA, this is done at
+        the call site if needed, though ULRSSM preprocessing makes this a no-op
 
     Args:
         dist_x (np.ndarray): Geodesic distance matrix of shape x. shape [Vx, Vx]
