@@ -165,6 +165,7 @@ class BaseModel:
         logger = get_root_logger()
 
         geo_errors = []
+        distortion_sums, distortion_means, dirichlet_energies = [], [], []
         timer = AvgTimer()
         pbar = tqdm(dataloader)
         # loop over every item in the validation set, pass it through the network
@@ -185,6 +186,25 @@ class BaseModel:
                     geo_err = geo_err / to_numpy(sqrt_surface_area(data_x['mass']))
                 pbar.set_description(f'geo error: {geo_err.mean():.4f}')
                 geo_errors.append(geo_err)
+
+            # Structural map-quality metrics (config-driven, same registry pattern).
+            # validate_single returns p2p as Y->X (second->first), while these metrics
+            # assume p2p: A->B; so A = second (the p2p domain), B = first (its codomain).
+            if 'geodesic_distortion' in self.metrics or 'dirichlet_energy' in self.metrics:
+                a, b = data['second'], data['first']
+                p2p_t = torch.as_tensor(p2p, dtype=torch.long)
+                if ('geodesic_distortion' in self.metrics
+                        and {'dist', 'mass'} <= a.keys() and {'dist', 'mass'} <= b.keys()):
+                    d_sum, d_mean = self.metrics['geodesic_distortion'](
+                        p2p_t, a['dist'], b['dist'],
+                        sqrt_surface_area(a['mass']), sqrt_surface_area(b['mass']))
+                    distortion_sums.append(float(d_sum))
+                    distortion_means.append(float(d_mean))
+                if ('dirichlet_energy' in self.metrics
+                        and 'L' in a and 'verts' in b and 'mass' in b):
+                    energy = self.metrics['dirichlet_energy'](
+                        p2p_t, a['L'], b['verts'], sqrt_surface_area(b['mass']))
+                    dirichlet_energies.append(float(energy))
 
         logger.info(f'Avg inference time: {timer.get_avg_time():.4f}s')
 
@@ -210,6 +230,16 @@ class BaseModel:
                 self.best_metric = avg_geo_error
                 self.best_networks_state_dict = self._get_networks_state_dict()
                 logger.info(f'Best model updated, avg geodesic error: {self.best_metric:.4f}')
+
+        # structural map-quality metrics, averaged over pairs (keys match run_baselines.py)
+        if distortion_means:
+            metrics_result['geodesic_distortion_mean'] = float(np.mean(distortion_means))
+            metrics_result['geodesic_distortion_sum'] = float(np.mean(distortion_sums))
+            logger.info(f'Val geodesic distortion (mean): '
+                        f'{metrics_result["geodesic_distortion_mean"]:.4f}')
+        if dirichlet_energies:
+            metrics_result['dirichlet_energy'] = float(np.mean(dirichlet_energies))
+            logger.info(f'Val dirichlet energy: {metrics_result["dirichlet_energy"]:.4f}')
 
         self.train()
         return metrics_result

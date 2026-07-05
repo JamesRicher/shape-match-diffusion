@@ -42,3 +42,6 @@ val:
     geo_error: {type: calculate_geodesic_error}
     # match run_baselines.py's PCK window so AUC is directly comparable
     plot_pck:  {type: plot_pck, threshold: 0.25, steps: 100}
+    # structural map-quality metrics (see run_baselines.py); need ret_evecs for L/mass
+    geodesic_distortion: {type: geodesic_distortion}
+    dirichlet_energy:    {type: dirichlet_energy}
