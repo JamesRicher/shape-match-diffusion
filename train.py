@@ -3,10 +3,14 @@ import argparse
 import torch
 from torch.utils.data import DataLoader
 
+import os.path as osp
+
 from datasets import build_dataset
 from models import build_model
 from utils.logger import get_root_logger
+from utils.metric_logger import MetricLogger
 from utils.options import load_yaml, resolve_experiment_paths
+from vis.plot_training import plot_training_curves
 
 
 # --------------------------------------------------------------------------- #
@@ -103,6 +107,10 @@ def train(opt, args):
     logger.info(f'Start training "{opt["name"]}" for {opt["train"]["total_epochs"]} epochs '
                 f'on {len(train_set)} pairs (device: {model.device}).')
 
+    # scalar logging -> results/metrics.csv (+ TensorBoard under experiments/<name>/tb/)
+    results_dir = opt['path']['results']
+    mlogger = MetricLogger(results_dir, tb_dir=osp.join(opt['path']['experiment_root'], 'tb'))
+
     log_freq = opt['train']['log_freq']
     for epoch in range(model.curr_epoch, opt['train']['total_epochs']):
         model.curr_epoch = epoch
@@ -121,6 +129,9 @@ def train(opt, args):
                 loss_str = ' '.join(f'{k}:{v.item():.4f}' for k, v in losses.items())
                 lr = model.get_current_learning_rate()[0]
                 logger.info(f'[epoch {epoch:03d}][iter {model.curr_iter:06d}] lr:{lr:.2e} {loss_str}')
+                mlogger.log_many({f'Loss/{k}': v.item() for k, v in losses.items()},
+                                 step=model.curr_iter, epoch=epoch)
+                mlogger.log('LR', lr, step=model.curr_iter, epoch=epoch)
 
             if args.debug and i >= 2:
                 break
@@ -128,12 +139,17 @@ def train(opt, args):
         model.update_model_per_epoch()
 
         # end-of-epoch validation + checkpoint
-        model.validation(val_loader, update=True)
+        val_metrics = model.validation(val_loader, update=True)
+        mlogger.log_many({f'Val/{k}': v for k, v in val_metrics.items()},
+                         step=model.curr_iter, epoch=epoch)
         model.save_model()
+        # refresh the curve PNGs each epoch so partial results are viewable mid-run
+        plot_training_curves(results_dir)
 
         if args.debug:
             break
 
+    mlogger.close()
     # save the best-by-validation weights as the final model
     model.save_model(net_only=True, best=True)
     # dump a self-describing summary (config + network stats) to the experiment root

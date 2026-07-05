@@ -4,6 +4,8 @@
 #
 #    pip-compile requirements.in
 #
+absl-py==2.5.0
+    # via tensorboard
 contourpy==1.3.3
     # via matplotlib
 cycler==0.12.1
@@ -14,12 +16,18 @@ fonttools==4.63.0
     # via matplotlib
 fsspec==2026.6.0
     # via torch
+grpcio==1.81.1
+    # via tensorboard
 jinja2==3.1.6
     # via torch
 kiwisolver==1.5.0
     # via matplotlib
+markdown==3.10.2
+    # via tensorboard
 markupsafe==3.0.3
-    # via jinja2
+    # via
+    #   jinja2
+    #   werkzeug
 matplotlib==3.11.0
     # via -r requirements.in
 mpmath==1.3.0
@@ -33,16 +41,22 @@ numpy==2.5.0
     #   matplotlib
     #   polyscope
     #   scipy
+    #   tensorboard
     #   torchvision
 packaging==26.2
-    # via matplotlib
+    # via
+    #   matplotlib
+    #   tensorboard
 pillow==12.2.0
     # via
     #   -r requirements.in
     #   matplotlib
+    #   tensorboard
     #   torchvision
 polyscope==2.6.1
     # via -r requirements.in
+protobuf==7.35.1
+    # via tensorboard
 pyparsing==3.3.2
     # via matplotlib
 python-dateutil==2.9.0.post0
@@ -55,6 +69,10 @@ six==1.17.0
     # via python-dateutil
 sympy==1.14.0
     # via torch
+tensorboard==2.21.0
+    # via -r requirements.in
+tensorboard-data-server==0.7.2
+    # via tensorboard
 torch==2.12.1
     # via
     #   -r requirements.in
@@ -65,8 +83,11 @@ tqdm==4.68.3
     # via -r requirements.in
 typing-extensions==4.15.0
     # via
+    #   grpcio
     #   polyscope
     #   torch
+werkzeug==3.1.8
+    # via tensorboard
 
 # The following packages are considered to be unsafe in a requirements file:
 # setuptools
