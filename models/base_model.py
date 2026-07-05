@@ -1,6 +1,9 @@
 import os
+import json
 import time
+import subprocess
 from copy import deepcopy
+from datetime import datetime, timezone
 from collections import OrderedDict
 
 import numpy as np
@@ -14,6 +17,7 @@ from networks import build_network
 from metrics import build_metric
 from losses import build_loss
 from utils.logger import get_root_logger, AvgTimer
+from utils.data_utils import sqrt_surface_area
 
 
 def to_numpy(x):
@@ -21,6 +25,17 @@ def to_numpy(x):
     if isinstance(x, torch.Tensor):
         return x.detach().cpu().numpy()
     return x
+
+
+def _git_commit():
+    """Current git commit hash (short), or None if unavailable (e.g. not a repo)."""
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        out = subprocess.run(['git', '-C', here, 'rev-parse', '--short', 'HEAD'],
+                             capture_output=True, text=True, timeout=5)
+        return out.stdout.strip() or None if out.returncode == 0 else None
+    except Exception:
+        return None
 
 
 class BaseModel:
@@ -38,7 +53,7 @@ class BaseModel:
         opt['networks']  ({name: {'type': ..., **kwargs}})
         opt['train']     ({'optims': {...}, 'schedulers': {...}, 'losses': {...}})
         opt['val']       ({'metrics': {name: {'type': ..., **kwargs}}})
-        opt['path']      ({'models': ..., 'visualization': ..., 'resume_state': ..., 'resume': bool})
+        opt['path']      ({'models': ..., 'results': ..., 'experiment_root': ..., 'resume_state': ..., 'resume': bool})
     """
 
     def __init__(self, opt):
@@ -78,12 +93,18 @@ class BaseModel:
     # methods a concrete model overrides
     # ------------------------------------------------------------------ #
     def feed_data(self, data):
-        """Run the forward pass and populate ``self.loss_metrics``."""
+        """
+        Run the forward pass and populate self.loss_metrics.
+        This is what actually passes the data through the network. This is used per shape pair,
+        where the batch dimension is taken to be the vertex count.
+        """
         raise NotImplementedError
 
     def validate_single(self, data):
-        """Run inference on a single (batch-of-one) pair and return a point-to-point
-        map ``p2p`` (shape y -> shape x), consumed by the validation metrics."""
+        """
+        Run inference on a single (batch-of-one) pair and return a point-to-point
+        map p2p (shape y -> shape x), consumed by the validation metrics.
+        """
         raise NotImplementedError
 
     # ------------------------------------------------------------------ #
@@ -128,11 +149,17 @@ class BaseModel:
     # validation
     # ------------------------------------------------------------------ #
     @torch.no_grad()
-    def validation(self, dataloader, update=True):
+    def validation(self, dataloader, update=True, out_dir=None):
         """Evaluate geodesic error / PCK over a validation dataloader.
 
         Relies on metrics named ``geo_error`` and (optionally) ``plot_pck`` being
         registered via ``opt['val']['metrics']``.
+
+        Args:
+            update (bool): track/update the best-by-error checkpoint (training use).
+                Pass ``False`` for a pure evaluation pass (e.g. final test).
+            out_dir (str, optional): directory for pck.png / pck.npy. Defaults to
+                ``opt['path']['results']`` (all run artifacts live under results/).
         """
         self.eval()
         logger = get_root_logger()
@@ -140,6 +167,7 @@ class BaseModel:
         geo_errors = []
         timer = AvgTimer()
         pbar = tqdm(dataloader)
+        # loop over every item in the validation set, pass it through the network
         for data in pbar:
             p2p = to_numpy(self.validate_single(data))
             timer.record()
@@ -150,6 +178,11 @@ class BaseModel:
                 geo_err = self.metrics['geo_error'](
                     to_numpy(dist_x), to_numpy(data_x['corr']), to_numpy(data_y['corr']),
                     p2p, return_mean=False)
+                # area-normalize so errors/PCK match the frozen baseline (run_baselines.py):
+                # the error lives on shape x, so scale by sqrt(area(x)). No-op on unit-area
+                # datasets like FAUST_r; only meaningful when mass (area) is available.
+                if 'mass' in data_x:
+                    geo_err = geo_err / to_numpy(sqrt_surface_area(data_x['mass']))
                 pbar.set_description(f'geo error: {geo_err.mean():.4f}')
                 geo_errors.append(geo_err)
 
@@ -166,7 +199,7 @@ class BaseModel:
                 auc, fig, pcks = self.metrics['plot_pck'](geo_errors)
                 metrics_result['auc'] = float(auc)
                 logger.info(f'Val auc: {auc:.4f}')
-                vis_dir = self.opt.get('path', {}).get('visualization')
+                vis_dir = out_dir or self.opt.get('path', {}).get('results')
                 if vis_dir:
                     os.makedirs(vis_dir, exist_ok=True)
                     fig.savefig(os.path.join(vis_dir, 'pck.png'), bbox_inches='tight')
@@ -265,6 +298,42 @@ class BaseModel:
         for name, net in self.networks.items():
             n_params = sum(p.numel() for p in net.parameters())
             logger.info(f'Network [{name}] {net.__class__.__name__}, params: {n_params:,d}')
+
+    def network_info(self):
+        """Per-network class name and parameter counts (total / trainable)."""
+        info = {}
+        for name, net in self.networks.items():
+            params = list(net.parameters())
+            info[name] = {
+                'class': net.__class__.__name__,
+                'num_params': int(sum(p.numel() for p in params)),
+                'num_trainable': int(sum(p.numel() for p in params if p.requires_grad)),
+            }
+        return info
+
+    def save_experiment_info(self, out_dir=None):
+        """Write ``experiment_info.json`` (the full config + network stats) to the
+        experiment root, so a finished run is self-describing. Defaults to
+        ``opt['path']['experiment_root']``."""
+        out_dir = out_dir or self.opt.get('path', {}).get('experiment_root')
+        if not out_dir:
+            return
+        os.makedirs(out_dir, exist_ok=True)
+        info = {
+            'name': self.opt.get('name'),
+            'model_type': self.opt.get('model_type'),
+            'timestamp': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+            'git_commit': _git_commit(),
+            'device': str(self.device),
+            'networks': self.network_info(),
+            'best_metric': self.best_metric,
+            'config': self.opt,
+        }
+        path = os.path.join(out_dir, 'experiment_info.json')
+        with open(path, 'w') as f:
+            # default=str so any non-JSON-native config values still serialize
+            json.dump(info, f, indent=2, default=str)
+        return path
 
     def train(self):
         self.is_train = True

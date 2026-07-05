@@ -8,7 +8,12 @@ is_train: true
 
 datasets:
   train: {name: Faust_r, type: PairFaustDataset, phase: train, ret_evecs: true}
-  val:   {name: Faust_r, type: PairFaustDataset, phase: test,  ret_evecs: true}
+  # exclude_self drops trivial (i, i) self-pairs so val/test match run_baselines.py.
+  val:   {name: Faust_r, type: PairFaustDataset, phase: test,  ret_evecs: true, exclude_self: true}
+  # evaluate.py runs the test set as the experiment's final result. Currently the
+  # same 20 shapes as val (best-model selection also monitors test) — swap to a
+  # held-out split here if you later decouple selection from test.
+  test:  {name: Faust_r, type: PairFaustDataset, phase: test,  ret_evecs: true, exclude_self: true}
 
 networks:
   encoder:
@@ -34,4 +39,5 @@ train:
 val:
   metrics:
     geo_error: {type: calculate_geodesic_error}
-    plot_pck:  {type: plot_pck}
+    # match run_baselines.py's PCK window so AUC is directly comparable
+    plot_pck:  {type: plot_pck, threshold: 0.25, steps: 100}

@@ -1,0 +1,14 @@
+{
+  "name": "shape_matching",
+  "checkpoint": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/shape_matching/models/final.pth",
+  "dataset": {
+    "name": "Faust_r",
+    "type": "PairFaustDataset",
+    "phase": "test",
+    "ret_evecs": true,
+    "exclude_self": true
+  },
+  "num_test_pairs": 380,
+  "avg_error": 0.012217232957482338,
+  "auc": 0.9533148697501328
+}

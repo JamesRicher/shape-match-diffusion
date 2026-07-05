@@ -194,16 +194,21 @@ class SingleShapeDataset(Dataset):
 
 
 class PairShapeDataset(Dataset):
-    def __init__(self, dataset):
+    def __init__(self, dataset, exclude_self=False):
         """
         Pair Shape Dataset
 
         Args:
             dataset (SingleShapeDataset): single shape dataset
+            exclude_self (bool): drop the diagonal (i, i) self-pairs. Self-pairs are
+                trivial (a shape matched to itself, ~zero geodesic error) and bias
+                evaluation metrics; ``run_baselines.py`` skips them, so set this True
+                for val/test to keep results comparable. Default False.
         """
         assert isinstance(dataset, SingleShapeDataset), f'Invalid input data type of dataset: {type(dataset)}'
         self.dataset = dataset
-        self.combinations = list(product(range(len(dataset)), repeat=2))
+        self.combinations = [(i, j) for i, j in product(range(len(dataset)), repeat=2)
+                             if not (exclude_self and i == j)]
 
         self.flip_up = self.dataset.flip_up
 

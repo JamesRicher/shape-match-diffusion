@@ -1,6 +1,9 @@
+import os.path as osp
 import re
 
 import yaml
+
+from paths import EXPERIMENTS_ROOT
 
 
 # PyYAML's default resolver treats scientific notation without a decimal point
@@ -26,3 +29,25 @@ def load_yaml(path):
     """Load a YAML config file into a nested dict."""
     with open(path, 'r') as f:
         return yaml.load(f, Loader=_YamlLoader)
+
+
+def resolve_experiment_paths(opt, resume=None):
+    """Populate ``opt['path']`` with the standard experiment layout under
+    ``experiments/<name>/``, without clobbering anything already set.
+
+    Layout:
+        experiments/<name>/   experiment_info.json (config + network stats)
+        models/               checkpoints (``final.pth`` = best)
+        results/              all run artifacts: pck.png/pck.npy, test stats.json
+
+    Shared by ``train.py`` and ``evaluate.py`` so both agree on where things live.
+    ``resume`` (if given) sets ``path['resume_state']`` (checkpoint to load).
+    """
+    exp_dir = osp.join(EXPERIMENTS_ROOT, opt['name'])
+    path = opt.setdefault('path', {})
+    path.setdefault('experiment_root', exp_dir)
+    path.setdefault('models', osp.join(exp_dir, 'models'))
+    path.setdefault('results', osp.join(exp_dir, 'results'))
+    if resume is not None:
+        path['resume_state'] = resume
+    return opt

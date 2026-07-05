@@ -137,9 +137,10 @@ class PairFaustDataset(PairShapeDataset):
                  ret_corr=True,
                  ret_dist=True,
                  ret_evecs=False,
-                 num_evecs=200):
+                 num_evecs=200,
+                 exclude_self=False):
         dataset = SingleFaustDataset(data_root, phase, ret_faces, ret_feats, ret_corr, ret_dist, ret_evecs, num_evecs)
-        super().__init__(dataset)
+        super().__init__(dataset, exclude_self=exclude_self)
 
 
 @DATASET_REGISTRY.register()
@@ -153,9 +154,10 @@ class PairSmalDataset(PairShapeDataset):
                  ret_corr=True,
                  ret_dist=True,
                  ret_evecs=False,
-                 num_evecs=200):
+                 num_evecs=200,
+                 exclude_self=False):
         dataset = SingleSmalDataset(data_root, phase, category, ret_faces, ret_feats, ret_corr, ret_dist, ret_evecs, num_evecs)
-        super().__init__(dataset=dataset)
+        super().__init__(dataset=dataset, exclude_self=exclude_self)
 
 
 @DATASET_REGISTRY.register()
@@ -168,6 +170,7 @@ class PairScapeDataset(PairShapeDataset):
                  ret_corr=True,
                  ret_dist=True,
                  ret_evecs=False,
-                 num_evecs=200):
+                 num_evecs=200,
+                 exclude_self=False):
         dataset = SingleScapeDataset(data_root, phase, ret_faces, ret_feats, ret_corr, ret_dist, ret_evecs, num_evecs)
-        super().__init__(dataset)
+        super().__init__(dataset, exclude_self=exclude_self)

@@ -84,7 +84,7 @@ def main():
         opt = train.build_opt(cli)
         # route outputs to scratch
         opt['path']['models'] = osp.join(tmp, 'models')
-        opt['path']['visualization'] = osp.join(tmp, 'vis')
+        opt['path']['results'] = osp.join(tmp, 'results')
         sched = opt['train']['schedulers']['encoder']
         assert sched.get('T_max') == opt['train']['total_epochs'], 'T_max != total_epochs'
         state.opt = opt
@@ -160,8 +160,8 @@ def main():
         val_slice = list(itertools.islice(state.val_loader, args.pairs))
         res = m.validation(val_slice, update=True)
         assert 'avg_error' in res and 'auc' in res
-        vis = state.opt['path']['visualization']
-        assert osp.isfile(osp.join(vis, 'pck.png')) and osp.isfile(osp.join(vis, 'pck.npy'))
+        results = state.opt['path']['results']
+        assert osp.isfile(osp.join(results, 'pck.png')) and osp.isfile(osp.join(results, 'pck.npy'))
         return f"avg_error={res['avg_error']:.4f} auc={res['auc']:.4f}, wrote pck.png/pck.npy"
     check('validation + PCK output', _validation)
 

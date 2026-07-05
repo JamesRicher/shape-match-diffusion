@@ -113,11 +113,14 @@ def sparse_np_to_torch(A: scipy.sparse.spmatrix) -> "torch.Tensor":
     import torch
     Acoo = A.tocoo()
     indices = np.vstack((Acoo.row, Acoo.col))
-    return torch.sparse_coo_tensor(
-        torch.from_numpy(indices).long(),
-        torch.from_numpy(Acoo.data).float(),
-        torch.Size(Acoo.shape),
-    ).coalesce()
+    # Explicitly enable sparse invariant checks: validates the (trusted, cached)
+    # operator and silences torch's "implicitly disabled" warning. Cheap here.
+    with torch.sparse.check_sparse_tensor_invariants(enable=True):
+        return torch.sparse_coo_tensor(
+            torch.from_numpy(indices).long(),
+            torch.from_numpy(Acoo.data).float(),
+            torch.Size(Acoo.shape),
+        ).coalesce()
 
 
 def fps(pool, n: int, start: int):

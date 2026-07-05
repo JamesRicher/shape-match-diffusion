@@ -1,14 +1,12 @@
 import argparse
-import os.path as osp
 
 import torch
 from torch.utils.data import DataLoader
 
 from datasets import build_dataset
 from models import build_model
-from paths import EXPERIMENTS_ROOT
 from utils.logger import get_root_logger
-from utils.options import load_yaml
+from utils.options import load_yaml, resolve_experiment_paths
 
 
 # --------------------------------------------------------------------------- #
@@ -39,11 +37,9 @@ def build_opt(args):
         if sched_cfg.get('type') == 'CosineAnnealingLR':
             sched_cfg['T_max'] = total_epochs
 
-    # resolve experiment output paths from the experiment name
-    exp_dir = osp.join(EXPERIMENTS_ROOT, opt['name'])
-    path = opt.setdefault('path', {})
-    path.setdefault('models', osp.join(exp_dir, 'models'))
-    path.setdefault('visualization', osp.join(exp_dir, 'visualization'))
+    # resolve experiment output paths (models/ results/) from the name
+    resolve_experiment_paths(opt)
+    path = opt['path']
     path['resume_state'] = args.resume if args.resume is not None else path.get('resume_state')
 
     return opt
@@ -140,7 +136,10 @@ def train(opt, args):
 
     # save the best-by-validation weights as the final model
     model.save_model(net_only=True, best=True)
+    # dump a self-describing summary (config + network stats) to the experiment root
+    info_path = model.save_experiment_info()
     logger.info(f'Training done. Best avg geodesic error: {model.best_metric}')
+    logger.info(f'Wrote experiment info to {info_path}')
 
 
 def main():
