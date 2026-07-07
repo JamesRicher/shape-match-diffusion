@@ -1,0 +1,51 @@
+# Shape-matching transformer on SMAL_r, canonical *category* split.
+# Run with:  python train.py -c configs/smal_cat_shape_matching.yaml
+# Identical pipeline to configs/smal_shape_matching.yaml, but uses category=true:
+# train on cow/dog/fox/lion/wolf and test on the held-out cougar/hippo/horse
+# species (test_cat.txt). This matches the standard SMAL_r protocol that published
+# baselines (e.g. ULRSSM) report against, unlike the in-distribution category=false
+# split used by shape_matching_smal.
+
+name: shape_matching_smal_cat  # experiment dir under experiments/<name>/
+model_type: ShapeMatchingModel
+is_train: true
+# device: cuda                # optional; auto-detected (cuda if available) when omitted
+
+datasets:
+  train: {name: Smal_r, type: PairSmalDataset, phase: train, ret_evecs: true, category: true}
+  # exclude_self drops trivial (i, i) self-pairs so val/test match run_baselines.py.
+  val:   {name: Smal_r, type: PairSmalDataset, phase: test,  ret_evecs: true, exclude_self: true, category: true}
+  # evaluate.py runs the test set as the experiment's final result. Currently the
+  # same shapes as val (best-model selection also monitors test) — swap to a
+  # held-out split here if you later decouple selection from test.
+  test:  {name: Smal_r, type: PairSmalDataset, phase: test,  ret_evecs: true, exclude_self: true, category: true}
+
+networks:
+  encoder:
+    type: ShapeMatchingEncoder
+    in_dim: null              # auto-filled from the data at runtime
+    dim: 128
+    heads: 4
+    depth: 4
+    dropout: 0.0
+
+train:
+  total_epochs: 94           # ~96k iters (1024 train pairs), matched to FAUST
+  log_freq: 20
+  optims:
+    encoder: {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+  schedulers:
+    # T_max is set automatically from total_epochs in train.py (do not set it here)
+    encoder: {type: CosineAnnealingLR, eta_min: 1e-4}
+  losses:
+    l_nce: {type: SupervisedContrastiveLoss, temperature: 0.07, loss_weight: 1.0}
+    l_dir: {type: DirichletLoss, normalize: true, loss_weight: 0.01}
+
+val:
+  metrics:
+    geo_error: {type: calculate_geodesic_error}
+    # match run_baselines.py's PCK window so AUC is directly comparable
+    plot_pck:  {type: plot_pck, threshold: 0.25, steps: 100}
+    # structural map-quality metrics (see run_baselines.py); need ret_evecs for L/mass
+    geodesic_distortion: {type: geodesic_distortion}
+    dirichlet_energy:    {type: dirichlet_energy}
