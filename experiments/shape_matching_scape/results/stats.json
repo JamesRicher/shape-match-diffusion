@@ -1,0 +1,17 @@
+{
+  "name": "shape_matching_scape",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/shape_matching_scape/models/final.pth",
+  "dataset": {
+    "name": "Scape_r",
+    "type": "PairScapeDataset",
+    "phase": "test",
+    "ret_evecs": true,
+    "exclude_self": true
+  },
+  "num_test_pairs": 380,
+  "avg_error": 0.019104352220892906,
+  "auc": 0.9239104066985646,
+  "geodesic_distortion_mean": 0.05597924256795331,
+  "geodesic_distortion_sum": 1400224.9754111841,
+  "dirichlet_energy": 2.999356039260563
+}

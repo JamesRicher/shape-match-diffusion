@@ -1,0 +1,105 @@
+{
+  "name": "shape_matching",
+  "model_type": null,
+  "timestamp": "2026-07-06T05:13:03+00:00",
+  "git_commit": "69059bf",
+  "device": "cuda",
+  "networks": {
+    "encoder": {
+      "class": "ShapeMatchingEncoder",
+      "num_params": 1616256,
+      "num_trainable": 1616256
+    }
+  },
+  "best_metric": 0.012344525195658207,
+  "config": {
+    "name": "shape_matching",
+    "is_train": true,
+    "datasets": {
+      "train": {
+        "name": "Faust_r",
+        "type": "PairFaustDataset",
+        "phase": "train",
+        "ret_evecs": true
+      },
+      "val": {
+        "name": "Faust_r",
+        "type": "PairFaustDataset",
+        "phase": "test",
+        "ret_evecs": true,
+        "exclude_self": true
+      },
+      "test": {
+        "name": "Faust_r",
+        "type": "PairFaustDataset",
+        "phase": "test",
+        "ret_evecs": true,
+        "exclude_self": true
+      }
+    },
+    "networks": {
+      "encoder": {
+        "type": "ShapeMatchingEncoder",
+        "in_dim": 256,
+        "dim": 128,
+        "heads": 4,
+        "depth": 4,
+        "dropout": 0.0
+      }
+    },
+    "train": {
+      "total_epochs": 15,
+      "log_freq": 20,
+      "optims": {
+        "encoder": {
+          "type": "AdamW",
+          "lr": 0.001,
+          "weight_decay": 0.0001
+        }
+      },
+      "schedulers": {
+        "encoder": {
+          "type": "CosineAnnealingLR",
+          "eta_min": 0.0001,
+          "T_max": 15
+        }
+      },
+      "losses": {
+        "l_nce": {
+          "type": "SupervisedContrastiveLoss",
+          "temperature": 0.07,
+          "loss_weight": 1.0
+        },
+        "l_dir": {
+          "type": "DirichletLoss",
+          "normalize": true,
+          "loss_weight": 0.01
+        }
+      }
+    },
+    "val": {
+      "metrics": {
+        "geo_error": {
+          "type": "calculate_geodesic_error"
+        },
+        "plot_pck": {
+          "type": "plot_pck",
+          "threshold": 0.25,
+          "steps": 100
+        },
+        "geodesic_distortion": {
+          "type": "geodesic_distortion"
+        },
+        "dirichlet_energy": {
+          "type": "dirichlet_energy"
+        }
+      }
+    },
+    "path": {
+      "experiment_root": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/shape_matching",
+      "models": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/shape_matching/models",
+      "results": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/shape_matching/results",
+      "resume_state": null
+    }
+  }
+}

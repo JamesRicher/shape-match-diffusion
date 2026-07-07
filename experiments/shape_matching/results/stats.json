@@ -1,6 +1,6 @@
 {
   "name": "shape_matching",
-  "checkpoint": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/shape_matching/models/final.pth",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/shape_matching/models/final.pth",
   "dataset": {
     "name": "Faust_r",
     "type": "PairFaustDataset",
@@ -9,6 +9,9 @@
     "exclude_self": true
   },
   "num_test_pairs": 380,
-  "avg_error": 0.012217232957482338,
-  "auc": 0.9533148697501328
+  "avg_error": 0.012344525195658207,
+  "auc": 0.952780659223817,
+  "geodesic_distortion_mean": 0.045011812257335373,
+  "geodesic_distortion_sum": 1125472.0634868422,
+  "dirichlet_energy": 1.756275991389626
 }
