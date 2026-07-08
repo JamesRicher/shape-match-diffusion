@@ -1,0 +1,18 @@
+{
+  "name": "shape_matching_smal_cat",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/shape_matching_smal_cat/models/final.pth",
+  "dataset": {
+    "name": "Smal_r",
+    "type": "PairSmalDataset",
+    "phase": "test",
+    "ret_evecs": true,
+    "exclude_self": true,
+    "category": true
+  },
+  "num_test_pairs": 380,
+  "avg_error": 0.14467677474021912,
+  "auc": 0.7039205715106704,
+  "geodesic_distortion_mean": 0.1253177692231379,
+  "geodesic_distortion_sum": 3406453.4402960525,
+  "dirichlet_energy": 100.68049274118323
+}
