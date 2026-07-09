@@ -37,7 +37,7 @@ def resolve_experiment_paths(opt, resume=None):
 
     Layout:
         experiments/<name>/   experiment_info.json (config + network stats)
-        models/               checkpoints (``final.pth`` = best)
+        models/               checkpoints (``latest.pth`` = resumable, ``final.pth`` = final-epoch)
         results/              all run artifacts: pck.png/pck.npy, test stats.json
 
     Shared by ``train.py`` and ``evaluate.py`` so both agree on where things live.

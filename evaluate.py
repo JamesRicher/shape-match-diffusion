@@ -130,9 +130,9 @@ def evaluate(opt, ckpt, args):
     results_dir = opt['path']['results']
     os.makedirs(results_dir, exist_ok=True)
 
-    # update=False: pure evaluation, no best-model tracking. out_dir sends pck.png /
-    # pck.npy to results/ (the same dir stats.json is written to).
-    metrics = model.validation(test_loader, update=False, out_dir=results_dir)
+    # pure evaluation pass. out_dir sends pck.png / pck.npy to results/ (the same
+    # dir stats.json is written to).
+    metrics = model.validation(test_loader, out_dir=results_dir)
 
     # qualitative texture-transfer figures on a few random pairs (results/qual/)
     generate_qualitative(model, test_set, os.path.join(results_dir, 'qual'),

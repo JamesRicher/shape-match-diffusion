@@ -14,7 +14,7 @@ def parse_args():
     parser.add_argument('--resume', default=None, help='path to a checkpoint to resume training from')
     parser.add_argument('--num_workers', type=int, default=0, help='dataloader workers')
     parser.add_argument('--debug', action='store_true', help='run a couple of iterations for a quick smoke test')
-    # for evaluation: default (None) evaluates the just-trained best model (final.pth)
+    # for evaluation: default (None) evaluates the just-trained final model (final.pth)
     parser.add_argument('--checkpoint', default=None,
                         help='checkpoint to evaluate (default: the run\'s final.pth)')
     return parser.parse_args()
@@ -28,7 +28,7 @@ def main():
     train_opt = train.build_opt(args)
     train.train(train_opt, args)
 
-    # 2. evaluate the best model on the test set (writes results/stats.json and the
+    # 2. evaluate the final model on the test set (writes results/stats.json and the
     #    test PCK curve pck.png)
     eval_opt, ckpt = evaluate.build_opt(args)
     evaluate.evaluate(eval_opt, ckpt, args)

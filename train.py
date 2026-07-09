@@ -139,7 +139,7 @@ def train(opt, args):
         model.update_model_per_epoch()
 
         # end-of-epoch validation + checkpoint
-        val_metrics = model.validation(val_loader, update=True)
+        val_metrics = model.validation(val_loader)
         mlogger.log_many({f'Val/{k}': v for k, v in val_metrics.items()},
                          step=model.curr_iter, epoch=epoch)
         model.save_model()
@@ -150,11 +150,13 @@ def train(opt, args):
             break
 
     mlogger.close()
-    # save the best-by-validation weights as the final model
-    model.save_model(net_only=True, best=True)
+    # save the final-epoch weights as the model to evaluate. We deliberately do NOT
+    # select a "best" checkpoint by validation error: the val set coincides with the
+    # test set, so cherry-picking on it would leak test labels into model selection.
+    model.save_model(net_only=True)
     # dump a self-describing summary (config + network stats) to the experiment root
     info_path = model.save_experiment_info()
-    logger.info(f'Training done. Best avg geodesic error: {model.best_metric}')
+    logger.info('Training done (reporting final-epoch checkpoint).')
     logger.info(f'Wrote experiment info to {info_path}')
 
 

@@ -29,4 +29,4 @@ def _single_collate(batch):
     return batch[0]
 
 val_loader = DataLoader(ds, batch_size=1, shuffle=True, collate_fn=_single_collate, num_workers=0)
-model.validation(val_loader, update=False)
+model.validation(val_loader)

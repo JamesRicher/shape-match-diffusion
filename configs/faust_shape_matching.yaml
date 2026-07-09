@@ -1,7 +1,7 @@
 # Shape-matching transformer on FAUST_r.
 # Run with:  python train.py -c configs/faust_shape_matching.yaml
 
-name: shape_matching          # experiment dir under experiments/<name>/
+name: faust_frozen         # experiment dir under experiments/<name>/
 model_type: ShapeMatchingModel
 is_train: true
 # device: cuda                # optional; auto-detected (cuda if available) when omitted

@@ -158,7 +158,7 @@ def main():
     def _validation():
         m = state.model
         val_slice = list(itertools.islice(state.val_loader, args.pairs))
-        res = m.validation(val_slice, update=True)
+        res = m.validation(val_slice)
         assert 'avg_error' in res and 'auc' in res
         results = state.opt['path']['results']
         assert osp.isfile(osp.join(results, 'pck.png')) and osp.isfile(osp.join(results, 'pck.npy'))
@@ -168,8 +168,8 @@ def main():
     # --- 9. save + resume round-trip --------------------------------------- #
     def _save_resume():
         m = state.model
-        m.save_model()                              # <iter>.pth (full)
-        m.save_model(net_only=True, best=True)      # final.pth (best weights)
+        m.save_model()                              # latest.pth (full, resumable)
+        m.save_model(net_only=True)                 # final.pth (final-epoch weights)
         models_dir = state.opt['path']['models']
         assert osp.isfile(osp.join(models_dir, 'final.pth'))
 

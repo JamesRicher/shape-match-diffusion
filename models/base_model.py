@@ -73,10 +73,6 @@ class BaseModel:
         self.metrics = OrderedDict()
         self._setup_metrics()
 
-        # best-model tracking (used by validation in both train and inference modes)
-        self.best_metric = None
-        self.best_networks_state_dict = None
-
         # training machinery
         if self.is_train:
             self.train() # set the model mode to train() if specified
@@ -149,15 +145,13 @@ class BaseModel:
     # validation
     # ------------------------------------------------------------------ #
     @torch.no_grad()
-    def validation(self, dataloader, update=True, out_dir=None):
+    def validation(self, dataloader, out_dir=None):
         """Evaluate geodesic error / PCK over a validation dataloader.
 
         Relies on metrics named ``geo_error`` and (optionally) ``plot_pck`` being
         registered via ``opt['val']['metrics']``.
 
         Args:
-            update (bool): track/update the best-by-error checkpoint (training use).
-                Pass ``False`` for a pure evaluation pass (e.g. final test).
             out_dir (str, optional): directory for pck.png / pck.npy. Defaults to
                 ``opt['path']['results']`` (all run artifacts live under results/).
         """
@@ -226,11 +220,6 @@ class BaseModel:
                     np.save(os.path.join(vis_dir, 'pck.npy'), pcks)
                 plt.close(fig)
 
-            if update and (self.best_metric is None or avg_geo_error < self.best_metric):
-                self.best_metric = avg_geo_error
-                self.best_networks_state_dict = self._get_networks_state_dict()
-                logger.info(f'Best model updated, avg geodesic error: {self.best_metric:.4f}')
-
         # structural map-quality metrics, averaged over pairs (keys match run_baselines.py)
         if distortion_means:
             metrics_result['geodesic_distortion_mean'] = float(np.mean(distortion_means))
@@ -257,8 +246,6 @@ class BaseModel:
         self.losses = OrderedDict()
         self._setup_losses()
         self.loss_metrics = OrderedDict()
-        self.best_networks_state_dict = self._get_networks_state_dict()
-        self.best_metric = None
 
     def _setup_networks(self):
         for name, network_opt in deepcopy(self.opt['networks']).items():
@@ -356,7 +343,6 @@ class BaseModel:
             'git_commit': _git_commit(),
             'device': str(self.device),
             'networks': self.network_info(),
-            'best_metric': self.best_metric,
             'config': self.opt,
         }
         path = os.path.join(out_dir, 'experiment_info.json')
@@ -375,8 +361,8 @@ class BaseModel:
         for net in self.networks.values():
             net.eval()
 
-    def save_model(self, net_only=False, best=False):
-        networks_state_dict = self.best_networks_state_dict if best else self._get_networks_state_dict()
+    def save_model(self, net_only=False):
+        networks_state_dict = self._get_networks_state_dict()
         if net_only:
             state_dict = {'networks': networks_state_dict}
             save_filename = 'final.pth'
@@ -388,7 +374,9 @@ class BaseModel:
                 'optimizers': {name: o.state_dict() for name, o in self.optimizers.items()},
                 'schedulers': {name: s.state_dict() for name, s in self.schedulers.items()},
             }
-            save_filename = f'{self.curr_iter}.pth'
+            # fixed filename so each epoch overwrites the previous resumable
+            # checkpoint instead of accumulating one per epoch
+            save_filename = 'latest.pth'
 
         models_dir = self.opt['path']['models']
         os.makedirs(models_dir, exist_ok=True)
