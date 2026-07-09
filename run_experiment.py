@@ -17,6 +17,12 @@ def parse_args():
     # for evaluation: default (None) evaluates the just-trained final model (final.pth)
     parser.add_argument('--checkpoint', default=None,
                         help='checkpoint to evaluate (default: the run\'s final.pth)')
+    # forwarded to evaluate.evaluate() for the qualitative texture-transfer figures
+    parser.add_argument('--num_qual', type=int, default=10,
+                        help='number of random test pairs to render texture-transfer '
+                             'figures for (results/qual/); 0 disables')
+    parser.add_argument('--qual_seed', type=int, default=0,
+                        help='RNG seed for picking the qualitative pairs')
     return parser.parse_args()
 
 
