@@ -1,0 +1,17 @@
+{
+  "name": "faust_frozen",
+  "checkpoint": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/faust_frozen/models/final.pth",
+  "dataset": {
+    "name": "Faust_r",
+    "type": "PairFaustDataset",
+    "phase": "test",
+    "ret_evecs": true,
+    "exclude_self": true
+  },
+  "num_test_pairs": 380,
+  "avg_error": 0.012572444044053555,
+  "auc": 0.951965898458267,
+  "geodesic_distortion_mean": 0.045100559404511985,
+  "geodesic_distortion_sum": 1127691.3603618422,
+  "dirichlet_energy": 1.8481127142906189
+}
