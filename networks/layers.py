@@ -20,6 +20,8 @@ class MultiHeadAttention(nn.Module):
         """
         x_q: (B, Lq, D) query side tokens
         x_kv: (B, Lk, D)
+        bias: additive attention bias, either (B, Lq, Lk) shared across heads or
+            (B, H, Lq, Lk) with a distinct bias per head (for per-head learned scales).
         """
         B, Lq, _ = x_q.shape
         Lk = x_kv.shape[1]
@@ -31,7 +33,8 @@ class MultiHeadAttention(nn.Module):
 
         logits = (q @ k.transpose(-2, -1)) * self.scale
         if bias is not None:
-            logits = logits + bias.unsqueeze(1)
+            # (B, Lq, Lk) -> broadcast over heads; (B, H, Lq, Lk) -> per-head
+            logits = logits + (bias.unsqueeze(1) if bias.dim() == 3 else bias)
 
         attn = logits.softmax(dim=-1)
         attn = self.dropout(attn)

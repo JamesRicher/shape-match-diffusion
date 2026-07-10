@@ -8,6 +8,14 @@ from typing import Optional
 import torch
 
 
+def safe_log(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """log with a floor so a zero entry gives a large finite value, not -inf.
+
+    Used wherever a log of an assignment matrix feeds a bias/logit (a -inf bias is a
+    dead, zero-gradient edge)."""
+    return torch.log(x.clamp_min(eps))
+
+
 def log_sinkhorn(
     log_alpha: torch.Tensor,
     n_iters: int = 10,

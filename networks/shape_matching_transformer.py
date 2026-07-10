@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from utils.registry import NETWORK_REGISTRY
-from networks.blocks import IntraShapeBlock, InterShapeBlock
+from networks.baseline_blocks import IntraShapeBlock, InterShapeBlock
 
 
 @NETWORK_REGISTRY.register()
