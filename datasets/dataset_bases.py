@@ -224,3 +224,74 @@ class PairShapeDataset(Dataset):
 
     def __len__(self):
         return len(self.combinations)
+
+
+class SparsePairShapeDataset(PairShapeDataset):
+    """Pair dataset augmented with FPS-subsampled sparse tokens for the matrix
+    diffusion matcher.
+
+    Wraps a SingleShapeDataset exactly like PairShapeDataset and keeps the full
+    'first'/'second' dicts (needed for eval-time densification). Per shape it adds a
+    'sparse' sub-dict (same key names as the full dict: feat, dist, verts, plus idx),
+    holding n_sparse points chosen by FPS on 'first' (X) and pushed through the shared
+    template to 'second' (Y), so the sparse GT is bijective by construction (main
+    note 5). Pair-level fields ('gt_perm', 'fps_idx') sit at the top level. Keeping
+    the per-shape/first-second layout mirrors the denoiser's pair-swap symmetry.
+
+    Args:
+        dataset: a SingleShapeDataset with ret_corr, ret_dist, ret_feats all True.
+        n_sparse: number of sparse points per shape.
+        phase: "train" randomises the FPS start each item (sweeps the surface over
+            epochs, doubles as augmentation); anything else uses a fixed start
+            (index-derived) for comparable val/test numbers.
+        exclude_self: forwarded to PairShapeDataset (drop the (i, i) self-pairs).
+    """
+    def __init__(self, dataset, n_sparse: int = 128, phase: str = "train", exclude_self: bool = False):
+        super().__init__(dataset, exclude_self=exclude_self)
+        assert dataset.ret_corr and dataset.ret_dist and dataset.ret_feats, \
+            "SparsePairShapeDataset needs corr, dist and feats"
+        self.n_sparse = n_sparse
+        self.train = (phase == "train")
+
+    def __getitem__(self, index):
+        item = super().__getitem__(index)          # {'first', 'second'} full dicts
+        x, y = item['first'], item['second']
+
+        corr_x = x['corr'].numpy()                 # (T,) template point -> vertex on X
+        corr_y = y['corr'].numpy()
+        T = corr_x.shape[0]
+        assert corr_y.shape[0] == T, "paired shapes must share the template length"
+        assert self.n_sparse <= T, f"n_sparse={self.n_sparse} exceeds template coverage {T}"
+
+        # FPS over X's covered vertices, kept bijective on both shapes (the .vts map is
+        # many-to-one per shape, so corr_y[K] can collide). K indexes both shapes' corr,
+        # so sparse_x[i] <-> sparse_y[i] is an exact permutation.
+        start = int(np.random.randint(T)) if self.train else index % T
+        K = consistent_bijective_fps(x['verts'].numpy(), corr_x, corr_y, self.n_sparse, start)
+
+        idx_x = torch.from_numpy(corr_x[K]).long()  # (n,) vertex indices on X, FPS order
+        idx_y = torch.from_numpy(corr_y[K]).long()  # (n,) matched vertex indices on Y
+
+        # Per-shape sparse views, nested in each shape dict with the full dict's own key
+        # names (feat/dist/verts) plus idx for eval densification.
+        x['sparse'] = {
+            'idx': idx_x,
+            'feat': x['feat'][idx_x],               # (n, d_f)
+            'verts': x['verts'][idx_x],             # (n, 3), viz/debug (not a denoiser input)
+            'dist': x['dist'][idx_x][:, idx_x],     # (n, n) area-normalised geodesic submatrix
+        }
+        y['sparse'] = {
+            'idx': idx_y,
+            'feat': y['feat'][idx_y],
+            'verts': y['verts'][idx_y],
+            'dist': y['dist'][idx_y][:, idx_y],
+        }
+
+        # Pair-level fields. Sparse GT is the identity permutation over K: gt_perm[j, i]
+        # = 1 means second point j matches first point i. No target shuffle: the denoiser
+        # is intrinsic-only (no index PE) so identity cannot be cheated, and keeping FPS
+        # order means D[:, :a] yields well-spread anchors for the spatial encoding.
+        n = self.n_sparse
+        item['gt_perm'] = torch.eye(n, dtype=torch.float32)   # P0 (n_y, n_x)
+        item['fps_idx'] = torch.from_numpy(K).long()          # shared template positions (cascade reuse)
+        return item

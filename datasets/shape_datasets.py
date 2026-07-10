@@ -1,4 +1,4 @@
-from datasets.dataset_bases import SingleShapeDataset, PairShapeDataset
+from datasets.dataset_bases import SingleShapeDataset, PairShapeDataset, SparsePairShapeDataset
 import os
 from utils.registry import DATASET_REGISTRY
 
@@ -141,6 +141,22 @@ class PairFaustDataset(PairShapeDataset):
                  exclude_self=False):
         dataset = SingleFaustDataset(data_root, phase, ret_faces, ret_feats, ret_corr, ret_dist, ret_evecs, num_evecs)
         super().__init__(dataset, exclude_self=exclude_self)
+
+
+@DATASET_REGISTRY.register()
+class SparsePairFaustDataset(SparsePairShapeDataset):
+    """FAUST_r pairs with FPS-sparse tokens + bijective sparse GT (diffusion matcher)."""
+    def __init__(self,
+                 data_root,
+                 phase="train",
+                 n_sparse=128,
+                 ret_evecs=False,
+                 num_evecs=200,
+                 exclude_self=False):
+        dataset = SingleFaustDataset(data_root, phase, ret_faces=True, ret_feats=True,
+                                     ret_corr=True, ret_dist=True, ret_evecs=ret_evecs,
+                                     num_evecs=num_evecs)
+        super().__init__(dataset, n_sparse=n_sparse, phase=phase, exclude_self=exclude_self)
 
 
 @DATASET_REGISTRY.register()

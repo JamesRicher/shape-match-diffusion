@@ -135,6 +135,75 @@ def fps(pool, n: int, start: int):
     return indices
 
 
+def _greedy_bijective(order: np.ndarray, corr_x: np.ndarray, corr_y: np.ndarray, n=None) -> np.ndarray:
+    """Walk template positions in `order`, keeping one only if its X- and Y-vertices are
+    both unused. Guarantees sparse_x and sparse_y are each injective. Stops at n picks
+    (or exhausts `order` when n is None)."""
+    sel, seen_x, seen_y = [], set(), set()
+    for k in order:
+        xv, yv = int(corr_x[k]), int(corr_y[k])
+        if xv in seen_x or yv in seen_y:
+            continue
+        seen_x.add(xv); seen_y.add(yv); sel.append(k)
+        if n is not None and len(sel) == n:
+            break
+    return np.asarray(sel, dtype=np.int64)
+
+
+def consistent_bijective_fps(verts_x: np.ndarray, corr_x: np.ndarray, corr_y: np.ndarray,
+                             n: int, start: int) -> np.ndarray:
+    """Pick n template positions giving a bijective sparse correspondence on both shapes.
+
+    The .vts map template point -> vertex is many-to-one per shape (FAUST: 5000 template
+    points -> ~3.5k distinct vertices), so corr_x[K] and corr_y[K] can collide. FPS on
+    X's covered points gives a well-spread ordering; :func:`_greedy_bijective` keeps only
+    positions distinct on both shapes, so the GT is an exact permutation. FPS depth grows
+    until n points are collected (cheap: caps well below the full template for small n).
+
+    Args:
+        verts_x: (Vx, 3) vertices of the first shape.
+        corr_x, corr_y: (T,) template -> vertex maps for the two shapes.
+        n: number of sparse points.
+        start: FPS start position (index into the T covered points).
+
+    Returns K (n,) template positions, in FPS order.
+    """
+    T = corr_x.shape[0]
+    pool = verts_x[corr_x]
+    depth = min(T, max(4 * n, 64))
+    while True:
+        sel = _greedy_bijective(fps(pool, depth, start), corr_x, corr_y, n)
+        if len(sel) == n:
+            return sel
+        if depth == T:
+            raise ValueError(f"only {len(sel)} bijective points available, need {n}")
+        depth = min(T, depth * 2)
+
+
+def bijective_fps_order(verts_x: np.ndarray, corr_x: np.ndarray, corr_y: np.ndarray,
+                        start: int) -> np.ndarray:
+    """All bijective template positions in FPS order (exhaustive over the template).
+
+    Its length is the maximum n_sparse for which a bijective sparse GT exists for this
+    pair and start — i.e. the point beyond which consistent bijective FPS is impossible.
+    O(T^2); for a one-off/vis use, not the training path (use consistent_bijective_fps).
+    """
+    T = corr_x.shape[0]
+    return _greedy_bijective(fps(verts_x[corr_x], T, start), corr_x, corr_y)
+
+
+def knn_from_dist(dist_sub, k: int):
+    """k nearest neighbours per row of an (n, n) distance submatrix, excluding self.
+
+    Self is the zero-distance diagonal, so it sorts first and is dropped. Returns a
+    (n, k) long tensor of neighbour indices (k clamped to n-1). Torch in, torch out.
+    """
+    import torch
+    n = dist_sub.shape[0]
+    k = min(k, n - 1)
+    return torch.argsort(dist_sub, dim=-1)[:, 1:k + 1].long()
+
+
 def l2_normalize_rows(x: np.ndarray, eps: float = 1e-8) -> np.ndarray:
     n = np.linalg.norm(x, axis=1, keepdims=True)
     return x / np.maximum(n, eps)

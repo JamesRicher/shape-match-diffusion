@@ -1,5 +1,7 @@
 import argparse
+import random
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
@@ -33,6 +35,8 @@ def build_opt(args):
         opt['train']['total_epochs'] = args.epochs
     if args.device is not None:
         opt['device'] = args.device
+    if getattr(args, 'seed', None) is not None:
+        opt['seed'] = args.seed
 
     # keep the cosine schedule length tied to the run length: T_max always follows
     # total_epochs (we step CosineAnnealingLR once per epoch), so the two can't drift.
@@ -57,8 +61,30 @@ def parse_args():
     parser.add_argument('--device', default=None, help="'cuda' / 'cpu'; auto-detected when omitted")
     parser.add_argument('--resume', default=None, help='path to a checkpoint to resume from')
     parser.add_argument('--num_workers', type=int, default=0, help='dataloader workers')
+    parser.add_argument('--seed', type=int, default=None, help='global RNG seed (overrides config "seed")')
     parser.add_argument('--debug', action='store_true', help='run a couple of iterations for a quick smoke test')
     return parser.parse_args()
+
+
+# --------------------------------------------------------------------------- #
+# reproducibility
+# --------------------------------------------------------------------------- #
+def seed_everything(seed: int):
+    """Seed python/numpy/torch global RNGs. The sparse dataset draws its FPS start
+    from the global numpy RNG, so this makes the sampled points reproducible too
+    (with num_workers=0; see _seed_worker for the multi-worker case)."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+def _seed_worker(worker_id: int):
+    """Re-seed numpy/random per DataLoader worker. Forked workers share the parent's
+    numpy seed otherwise, so every worker would draw identical FPS starts."""
+    seed = torch.initial_seed() % 2**32   # torch gives each worker a distinct base seed
+    np.random.seed(seed)
+    random.seed(seed)
 
 
 # --------------------------------------------------------------------------- #
@@ -86,9 +112,11 @@ def build_dataloaders(opt, num_workers):
     train_set = build_dataset(opt['datasets']['train'])
     val_set = build_dataset(opt['datasets']['val'])
     train_loader = DataLoader(train_set, batch_size=1, shuffle=True,
-                              collate_fn=_single_collate, num_workers=num_workers)
+                              collate_fn=_single_collate, num_workers=num_workers,
+                              worker_init_fn=_seed_worker)
     val_loader = DataLoader(val_set, batch_size=1, shuffle=False,
-                            collate_fn=_single_collate, num_workers=num_workers)
+                            collate_fn=_single_collate, num_workers=num_workers,
+                            worker_init_fn=_seed_worker)
     return train_set, train_loader, val_loader
 
 
@@ -163,6 +191,10 @@ def train(opt, args):
 def main():
     args = parse_args()
     opt = build_opt(args)
+    seed = opt.get('seed')
+    if seed is not None:
+        seed_everything(int(seed))
+        get_root_logger().info(f'Global seed set to {seed}.')
     train(opt, args)
 
 
