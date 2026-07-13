@@ -1,5 +1,7 @@
 import argparse
 import random
+import time
+from datetime import timedelta
 
 import numpy as np
 import torch
@@ -175,6 +177,9 @@ def train(opt, args):
     mlogger = MetricLogger(results_dir, tb_dir=osp.join(opt['path']['experiment_root'], 'tb'))
 
     log_freq = opt['train']['log_freq']
+    # rough ETA: iters/sec since training started, projected over the remaining iters
+    total_iters = opt['train']['total_epochs'] * len(train_loader)
+    start_time = time.time()
     for epoch in range(model.curr_epoch, opt['train']['total_epochs']):
         model.curr_epoch = epoch
         model.train()
@@ -191,7 +196,10 @@ def train(opt, args):
                 losses = model.get_loss_metrics()
                 loss_str = ' '.join(f'{k}:{v.item():.4f}' for k, v in losses.items())
                 lr = model.get_current_learning_rate()[0]
-                logger.info(f'[epoch {epoch:03d}][iter {model.curr_iter:06d}] lr:{lr:.2e} {loss_str}')
+                elapsed = time.time() - start_time
+                eta = elapsed / model.curr_iter * (total_iters - model.curr_iter)  # excludes val time
+                logger.info(f'[epoch {epoch:03d}][iter {model.curr_iter:06d}] lr:{lr:.2e} {loss_str} '
+                            f'eta:{timedelta(seconds=int(eta))}')
                 mlogger.log_many({f'Loss/{k}': v.item() for k, v in losses.items()},
                                  step=model.curr_iter, epoch=epoch)
                 mlogger.log('LR', lr, step=model.curr_iter, epoch=epoch)
