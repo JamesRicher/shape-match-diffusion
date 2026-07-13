@@ -4,7 +4,9 @@ from glob import glob
 import torch
 import re
 import os
+from collections import OrderedDict
 from itertools import product
+from typing import Optional
 
 def sort_list(l):
     try:
@@ -14,14 +16,41 @@ def sort_list(l):
     
 
 class ShapeCache:
-    """Lazy path-keyed loader for shape data, owned by a Dataset instance."""
-    def __init__(self):
+    """Lazy path-keyed loader for shape data, owned by a Dataset instance.
+
+    The heavy per-shape entries (the full N×N geodesic distance matrix and the spectral
+    operators) are held in bounded LRU stores, so worker RAM stays flat regardless of how
+    many distinct shapes an epoch touches — important with multiple DataLoader workers on a
+    shared machine, where an unbounded cache would grow to (#shapes × ~100MB) per worker.
+    The light entries (feats/verts/faces/corres) stay unbounded; they're small.
+
+    Args:
+        dist_maxsize: max distinct geodesic matrices kept (LRU). None => unbounded.
+        ops_maxsize: max distinct spectral-operator sets kept (LRU). None => unbounded.
+    """
+    def __init__(self, dist_maxsize: Optional[int] = 16, ops_maxsize: Optional[int] = 16):
         self._feats: dict = {}
         self._corres: dict = {}
         self._verts: dict = {}
         self._faces: dict = {}
-        self._dists: dict = {}
-        self._ops: dict = {}
+        self._dists: OrderedDict = OrderedDict()
+        self._ops: OrderedDict = OrderedDict()
+        self._dist_maxsize = dist_maxsize
+        self._ops_maxsize = ops_maxsize
+
+    @staticmethod
+    def _lru_get(store: OrderedDict, key, loader, maxsize: Optional[int]):
+        """Return store[key], loading via loader() on a miss and evicting the least-recently
+        used entry once the store exceeds maxsize (maxsize=None => never evict)."""
+        if key in store:
+            store.move_to_end(key)                 # mark most-recently used
+            return store[key]
+        value = loader()
+        store[key] = value
+        if maxsize is not None:
+            while len(store) > maxsize:
+                store.popitem(last=False)          # drop least-recently used
+        return value
 
     def feats(self, feat_file: str) -> np.ndarray:
         if feat_file not in self._feats:
@@ -41,16 +70,14 @@ class ShapeCache:
         return self._corres[corr_file]
 
     def dist(self, dist_file: str) -> np.ndarray:
-        if dist_file not in self._dists:
-            self._dists[dist_file] = load_dist(dist_file)
-        return self._dists[dist_file]
+        return self._lru_get(self._dists, dist_file,
+                             lambda: load_dist(dist_file), self._dist_maxsize)
 
     def ops(self, off_file: str, diffusion_dir: str) -> dict:
         key = (off_file, diffusion_dir)
-        if key not in self._ops:
-            verts, faces = self.geom(off_file)
-            self._ops[key] = load_diffusion_operators(verts, faces, diffusion_dir)
-        return self._ops[key]
+        return self._lru_get(self._ops, key,
+                             lambda: load_diffusion_operators(*self.geom(off_file), diffusion_dir),
+                             self._ops_maxsize)
 
 
 class SingleShapeDataset(Dataset):
