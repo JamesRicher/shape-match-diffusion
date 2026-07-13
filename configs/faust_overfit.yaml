@@ -5,7 +5,7 @@
 # (Hungarian recovers the GT sparse permutation on the same pair it trained on).
 # If loss plateaus high, the P_t pathway is broken -- fix before scaling.
 
-name: faust_overfit
+name: faust_diffusion_overfit
 model_type: MatrixDiffusionModel
 is_train: true
 
