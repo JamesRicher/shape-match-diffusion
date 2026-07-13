@@ -11,9 +11,9 @@ is_train: true
 
 datasets:
   # Sparse FPS tokens with a bijective sparse GT permutation (n_sparse per shape).
-  train: {name: Faust_r, type: SparsePairFaustDataset, phase: train, n_sparse: 128}
-  val:   {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 128, exclude_self: true}
-  test:  {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 128, exclude_self: true}
+  train: {name: Faust_r, type: SparsePairFaustDataset, phase: train, n_sparse: 256}
+  val:   {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 256, exclude_self: true}
+  test:  {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 256, exclude_self: true}
 
 networks:
   denoiser:
