@@ -32,6 +32,11 @@ class MatrixDiffusionModel(BaseModel):
         self.schedule_s = cfg.get('schedule_s', 0.008)  # cosine ᾱ offset
         self.sample_steps = cfg.get('sample_steps', 50) # reverse steps at inference
         self.final_iters = cfg.get('final_iters', 20)   # Sinkhorn iters for the final DS snap
+        # zero the per-point features so the ONLY cross-shape signal is P_t (the alpha*log P_t
+        # skip + geodesic pull-backs). Turns the single-pair overfit into a genuine test of the
+        # P_t pathway: with features present the bilinear readout solves the match from features
+        # alone and loss_vs_t is flat at every t (see overfit-gate-feature-shortcut memory).
+        self.ablate_features = cfg.get('ablate_features', False)
 
         # optional Phase-3 diagnostics (steps.md Step 7), run at validation when enabled
         diag = opt.get('diagnostics', {})
@@ -49,7 +54,10 @@ class MatrixDiffusionModel(BaseModel):
         Returns F_x, F_y (B,n,d_f); D_x, D_y (B,n,n); P0 (B,n_y,n_x)."""
         xs, ys = data['first']['sparse'], data['second']['sparse']
         b = lambda z: (z.unsqueeze(0) if z.dim() == 2 else z).to(self.device).float()
-        return (b(xs['feat']), b(ys['feat']), b(xs['dist']), b(ys['dist']), b(data['gt_perm']))
+        F_x, F_y = b(xs['feat']), b(ys['feat'])
+        if self.ablate_features:                                    # P_t-only diagnostic
+            F_x, F_y = torch.zeros_like(F_x), torch.zeros_like(F_y)
+        return (F_x, F_y, b(xs['dist']), b(ys['dist']), b(data['gt_perm']))
 
     def _row_logprob(self, u):
         """Π_S(u) as row-normalised log-probabilities (rows sum to 1 exactly, for CE).

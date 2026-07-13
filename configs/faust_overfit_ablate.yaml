@@ -1,0 +1,58 @@
+# Feature-ablated overfit: the ACTUAL go/no-go for the P_t pathway (steps.md Step 7).
+# Run with:  python train.py -c configs/faust_overfit_ablate.yaml
+#
+# Same single-pair overfit as faust_overfit.yaml, but diffusion.ablate_features zeroes the
+# per-point features so the denoiser's only cross-shape signal is P_t (the alpha*log P_t skip
+# + geodesic pull-backs). With features present the bilinear readout solves the match from
+# features alone and loss_vs_t is flat at every t, telling us nothing about P_t. Ablated, the
+# curve becomes diagnostic:
+#   loss_t_slope > 0  => loss falls toward small t (near-clean P_t) => the denoiser USES P_t.
+#   loss_t_slope ~ 0  => the P_t pathway is dead -- fix before scaling to Phase 4.
+# See the overfit-gate-feature-shortcut memory.
+
+name: faust_diffusion_overfit_ablate
+model_type: MatrixDiffusionModel
+is_train: true
+
+datasets:
+  train: {name: Faust_r, type: SparsePairFaustDataset, phase: test, n_sparse: 256, exclude_self: true}
+  val:   {name: Faust_r, type: SparsePairFaustDataset, phase: test, n_sparse: 256, exclude_self: true}
+  test:  {name: Faust_r, type: SparsePairFaustDataset, phase: test, n_sparse: 256, exclude_self: true}
+
+networks:
+  denoiser:
+    type: MatrixDenoiser
+    feat_dim: null             # auto-filled from the data at runtime
+    dim: 128
+    heads: 4
+    depth: 6
+    n_anchors: 16
+    dropout: 0.0
+
+diffusion:
+  eta: 0.1
+  proj_iters: 6
+  schedule_s: 0.008
+  sample_steps: 50
+  final_iters: 20
+  ablate_features: true        # <-- the only change vs faust_overfit.yaml: P_t is the sole signal
+
+diagnostics:
+  loss_vs_t: true
+  divergence: true
+  bins: 10
+  repeats: 16
+  samples: 8
+
+train:
+  total_epochs: 3
+  log_freq: 50
+  subset: 1
+  repeat: 500
+  optims:
+    denoiser: {type: AdamW, lr: 1e-3, weight_decay: 0.0}
+  schedulers:
+    denoiser: {type: CosineAnnealingLR, eta_min: 1e-4}
+
+val:
+  subset: 1
