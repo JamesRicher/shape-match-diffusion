@@ -1,0 +1,60 @@
+# Phase 3 go/no-go gate: overfit ONE fixed FAUST_r pair (steps.md Step 7).
+# Run with:  python train.py -c configs/faust_overfit.yaml
+#
+# Expected if the machinery is sound: l_ce -> ~0 and the sparse dev acc -> ~1.0
+# (Hungarian recovers the GT sparse permutation on the same pair it trained on).
+# If loss plateaus high, the P_t pathway is broken -- fix before scaling.
+
+name: faust_overfit
+model_type: MatrixDiffusionModel
+is_train: true
+
+datasets:
+  # phase: test => deterministic FPS start, so the sparse points (and the gt_perm) are
+  # FIXED across iterations -- a true single-example overfit. subset/repeat below pin it
+  # to one pair. Split hygiene is irrelevant here (this is a capacity sanity check).
+  train: {name: Faust_r, type: SparsePairFaustDataset, phase: test, n_sparse: 128, exclude_self: true}
+  val:   {name: Faust_r, type: SparsePairFaustDataset, phase: test, n_sparse: 128, exclude_self: true}
+  test:  {name: Faust_r, type: SparsePairFaustDataset, phase: test, n_sparse: 128, exclude_self: true}
+
+networks:
+  denoiser:
+    type: MatrixDenoiser
+    feat_dim: null             # auto-filled from the data at runtime
+    dim: 128
+    heads: 4
+    depth: 6
+    n_anchors: 16
+    dropout: 0.0
+
+diffusion:
+  eta: 0.1
+  proj_iters: 6
+  schedule_s: 0.008
+  sample_steps: 50
+  final_iters: 20
+
+# Phase-3 gate diagnostics, logged at each validation (steps.md Step 7):
+#   loss_t_slope > 0  => loss falls toward small t, the denoiser actually uses P_t
+#                        (a flat/zero slope means the P_t pathway is broken -- stop & fix)
+#   traj_divergence   => spread of hard maps across prior draws (expect ~0 on this single
+#                        memorised pair; the real test is on a symmetric pair in Phase 4)
+diagnostics:
+  loss_vs_t: true
+  divergence: true
+  bins: 10
+  repeats: 16
+  samples: 8
+
+train:
+  total_epochs: 40             # 40 * repeat = 20k gradient steps
+  log_freq: 50
+  subset: 1                    # overfit a single fixed pair (train_set index 0)
+  repeat: 500                  # 500 iters/epoch of that pair (validation runs once/epoch)
+  optims:
+    denoiser: {type: AdamW, lr: 1e-3, weight_decay: 0.0}   # wd=0: we WANT to memorise
+  schedulers:
+    denoiser: {type: CosineAnnealingLR, eta_min: 1e-4}
+
+val:
+  subset: 1                    # validate on the same single pair (val_set index 0)

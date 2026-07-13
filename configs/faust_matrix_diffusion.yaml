@@ -1,0 +1,50 @@
+# Matrix diffusion matcher on FAUST_r (logit-space DDPM over the assignment).
+# Run with:  python train.py -c configs/faust_matrix_diffusion.yaml
+# Evaluate:  python evaluate.py -c configs/faust_matrix_diffusion.yaml --num_qual 0
+#   (--num_qual 0 required: validate_single returns a SPARSE p2p; dense qualitative
+#    texture-transfer needs densification, which is deferred — steps.md Step 3.)
+
+name: faust_matrix_diffusion   # experiment dir under experiments/<name>/
+model_type: MatrixDiffusionModel
+is_train: true
+# device: cuda                 # optional; auto-detected (cuda if available) when omitted
+
+datasets:
+  # Sparse FPS tokens with a bijective sparse GT permutation (n_sparse per shape).
+  train: {name: Faust_r, type: SparsePairFaustDataset, phase: train, n_sparse: 128}
+  val:   {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 128, exclude_self: true}
+  test:  {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 128, exclude_self: true}
+
+networks:
+  denoiser:
+    type: MatrixDenoiser
+    feat_dim: null             # auto-filled from the data at runtime
+    dim: 128
+    heads: 4
+    depth: 6
+    n_anchors: 16
+    dropout: 0.0
+
+# forward/reverse diffusion knobs (read by MatrixDiffusionModel)
+diffusion:
+  eta: 0.1                     # logit_target label-smoothing
+  proj_iters: 6                # Sinkhorn Π_S iterations (read-in + training projection)
+  schedule_s: 0.008            # cosine ᾱ offset
+  sample_steps: 50             # DDIM reverse steps at inference
+  final_iters: 20              # Sinkhorn iters for the final DS snap
+
+train:
+  total_epochs: 30
+  log_freq: 20
+  optims:
+    denoiser: {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+  schedulers:
+    # T_max is set automatically from total_epochs in train.py (do not set it here)
+    denoiser: {type: CosineAnnealingLR, eta_min: 1e-4}
+
+# validation uses the model's own sparse dev metric (avg_error + acc over FPS points);
+# no registry metrics needed (densification / dense geo_error deferred — steps.md Step 3).
+val:
+  # each val pair runs a full DDIM sampler, so cap mid-training validation to a fixed
+  # subset (evenly spaced, deterministic). Full test eval (evaluate.py) uses all pairs.
+  subset: 40

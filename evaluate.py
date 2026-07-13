@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 from datasets import build_dataset
 from models import build_model
 from models.base_model import to_numpy
-from train import _single_collate
+from train import _single_collate, autofill_feat_dim
 from utils.data_utils import sqrt_surface_area
 from utils.logger import get_root_logger
 from utils.options import load_yaml, resolve_experiment_paths
@@ -119,8 +119,8 @@ def evaluate(opt, ckpt, args):
     test_loader = DataLoader(test_set, batch_size=1, shuffle=False,
                              collate_fn=_single_collate, num_workers=args.num_workers)
 
-    # match the encoder input dim to the actual per-vertex feature dim (as in train.py)
-    opt['networks']['encoder']['in_dim'] = int(test_set[0]['first']['feat'].shape[-1])
+    # match each network's input dim to the actual per-vertex feature dim (as in train.py)
+    autofill_feat_dim(opt, int(test_set[0]['first']['feat'].shape[-1]))
 
     # the constructor loads `ckpt` (net-only, since is_train is False)
     model = build_model(opt)

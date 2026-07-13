@@ -3,7 +3,7 @@ import random
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset, ConcatDataset
 
 import os.path as osp
 
@@ -99,6 +99,16 @@ def _single_collate(batch):
     return batch[0]
 
 
+def autofill_feat_dim(opt, feat_dim):
+    """Fill any network config field left null (`in_dim` for the encoder, `feat_dim` for
+    the matrix denoiser) with the actual per-vertex feature dim from the data. Networks
+    that hardcode the dim are left untouched."""
+    for net_cfg in opt['networks'].values():
+        for key in ('in_dim', 'feat_dim'):
+            if key in net_cfg and net_cfg[key] is None:
+                net_cfg[key] = feat_dim
+
+
 def move_to_device(obj, device):
     """Recursively move tensors in a (possibly nested) dict to ``device``."""
     if isinstance(obj, torch.Tensor):
@@ -108,9 +118,34 @@ def move_to_device(obj, device):
     return obj
 
 
+def _maybe_subset(dataset, n):
+    """Deterministic evenly-spaced subset of `n` items, for cheap mid-training validation.
+    Returns the dataset unchanged if `n` is falsy or >= its length. Full test evaluation
+    (evaluate.py) is unaffected — it builds the test set directly."""
+    if not n or n >= len(dataset):
+        return dataset
+    stride = max(1, len(dataset) // n)
+    indices = list(range(0, len(dataset), stride))[:n]
+    return Subset(dataset, indices)
+
+
 def build_dataloaders(opt, num_workers):
     train_set = build_dataset(opt['datasets']['train'])
     val_set = build_dataset(opt['datasets']['val'])
+
+    # optional val subset (opt['val']['subset']): validation runs a sampler per pair, so
+    # the full val set can be slow; a fixed subset keeps epoch-to-epoch numbers comparable.
+    val_set = _maybe_subset(val_set, (opt.get('val') or {}).get('subset'))
+
+    # overfit knobs (opt['train']): 'subset' picks a few fixed pairs (use a deterministic
+    # dataset phase so the sparse FPS points are fixed too), 'repeat' inflates one epoch to
+    # many iterations of those pairs so validation still runs once per epoch, not per step.
+    train_cfg = opt.get('train') or {}
+    train_set = _maybe_subset(train_set, train_cfg.get('subset'))
+    repeat = train_cfg.get('repeat')
+    if repeat and repeat > 1:
+        train_set = ConcatDataset([train_set] * int(repeat))
+
     train_loader = DataLoader(train_set, batch_size=1, shuffle=True,
                               collate_fn=_single_collate, num_workers=num_workers,
                               worker_init_fn=_seed_worker)
@@ -128,8 +163,8 @@ def train(opt, args):
 
     train_set, train_loader, val_loader = build_dataloaders(opt, args.num_workers)
 
-    # match the encoder input dim to the actual per-vertex feature dim
-    opt['networks']['encoder']['in_dim'] = int(train_set[0]['first']['feat'].shape[-1])
+    # match each network's input dim to the actual per-vertex feature dim
+    autofill_feat_dim(opt, int(train_set[0]['first']['feat'].shape[-1]))
 
     model = build_model(opt)
     logger.info(f'Start training "{opt["name"]}" for {opt["train"]["total_epochs"]} epochs '
