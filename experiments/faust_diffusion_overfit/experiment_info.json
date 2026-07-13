@@ -1,0 +1,95 @@
+{
+  "name": "faust_diffusion_overfit",
+  "model_type": null,
+  "timestamp": "2026-07-13T13:43:37+00:00",
+  "git_commit": "e263c9f",
+  "device": "cuda",
+  "networks": {
+    "denoiser": {
+      "class": "MatrixDenoiser",
+      "num_params": 3676977,
+      "num_trainable": 3676977
+    }
+  },
+  "config": {
+    "name": "faust_diffusion_overfit",
+    "is_train": true,
+    "datasets": {
+      "train": {
+        "name": "Faust_r",
+        "type": "SparsePairFaustDataset",
+        "phase": "test",
+        "n_sparse": 256,
+        "exclude_self": true
+      },
+      "val": {
+        "name": "Faust_r",
+        "type": "SparsePairFaustDataset",
+        "phase": "test",
+        "n_sparse": 256,
+        "exclude_self": true
+      },
+      "test": {
+        "name": "Faust_r",
+        "type": "SparsePairFaustDataset",
+        "phase": "test",
+        "n_sparse": 256,
+        "exclude_self": true
+      }
+    },
+    "networks": {
+      "denoiser": {
+        "type": "MatrixDenoiser",
+        "feat_dim": 256,
+        "dim": 128,
+        "heads": 4,
+        "depth": 6,
+        "n_anchors": 16,
+        "dropout": 0.0
+      }
+    },
+    "diffusion": {
+      "eta": 0.1,
+      "proj_iters": 6,
+      "schedule_s": 0.008,
+      "sample_steps": 50,
+      "final_iters": 20
+    },
+    "diagnostics": {
+      "loss_vs_t": true,
+      "divergence": true,
+      "bins": 10,
+      "repeats": 16,
+      "samples": 8
+    },
+    "train": {
+      "total_epochs": 3,
+      "log_freq": 50,
+      "subset": 1,
+      "repeat": 500,
+      "optims": {
+        "denoiser": {
+          "type": "AdamW",
+          "lr": 0.001,
+          "weight_decay": 0.0
+        }
+      },
+      "schedulers": {
+        "denoiser": {
+          "type": "CosineAnnealingLR",
+          "eta_min": 0.0001,
+          "T_max": 3
+        }
+      }
+    },
+    "val": {
+      "subset": 1
+    },
+    "path": {
+      "experiment_root": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/faust_diffusion_overfit",
+      "models": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/faust_diffusion_overfit/models",
+      "results": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/faust_diffusion_overfit/results",
+      "resume_state": null
+    }
+  }
+}
