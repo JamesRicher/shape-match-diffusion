@@ -1,8 +1,14 @@
 """Sinkhorn + Birkhoff-polytope utilities for the sparse matrix diffusion matcher.
 
 Soft assignment matrices P have shape (..., R, C) with R = n_y rows, C = n_x cols.
-Flow convention: t=0 is clean data, t=1 is noise.
+
+Noising is DDPM in the logit domain (notes/noising.md): the diffusion variable is an
+unconstrained logit matrix u; a doubly-stochastic P = Π_S(u) = log_sinkhorn(u).exp() is
+only ever the projected view. logit_target embeds the GT permutation as a finite logit u0,
+q_sample runs the variance-preserving forward marginal on u0, and cosine_alpha_bar is the
+schedule. Time convention: t=0 is clean data, t=1 is noise.
 """
+import math
 from typing import Optional
 
 import torch
@@ -71,11 +77,11 @@ def sample_doubly_stochastic(
     dtype=torch.float32,
     generator=None,
 ) -> torch.Tensor:
-    """Random doubly-stochastic matrix via Sinkhorn(Gumbel noise) — the prior P_noise.
+    """Random doubly-stochastic matrix via Sinkhorn(Gumbel noise).
 
     Maximum-entropy sample on the polytope; as tau -> 0 it concentrates on a uniformly
-    random permutation (Gumbel-Sinkhorn). Draw once per example to define the noisy end
-    (t=1) of the interpolant.
+    random permutation (Gumbel-Sinkhorn). A convenient DS prior / test fixture; not the
+    forward noise (that is Gaussian in the logit chart — see q_sample).
 
     Args:
         n_rows, n_cols: matrix shape (n_y, n_x).
@@ -89,20 +95,60 @@ def sample_doubly_stochastic(
     return log_sinkhorn(g, n_iters=n_iters, tau=tau).exp()
 
 
-def interpolate(P0: torch.Tensor, P_noise: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-    """Convex flow-matching interpolant P_t = (1 - t)·P0 + t·P_noise.
+def logit_target(P0: torch.Tensor, eta: float = 0.1, eps: float = 1e-8) -> torch.Tensor:
+    """Clean logit target u0 = log((1 - eta)·P0 + eta/m·1) for the logit-space diffusion.
 
-    t=0 is clean data P0, t=1 is noise. A blend of doubly-stochastic matrices stays
-    doubly stochastic, so P_t is always valid — no re-projection.
+    log(P0) has -inf on the zeros of a (near-)permutation. Label-smoothing toward the
+    row-barycenter (a convex mix of two row-stochastic matrices stays row-stochastic, so
+    the log is finite) gives a bounded target whose magnitude sets the near-t=0 difficulty.
 
     Args:
-        P0: (..., R, C) clean target (a permutation or its relaxation).
-        P_noise: (..., R, C) noise sample from sample_doubly_stochastic.
-        t: scalar, or a batch-shaped tensor reshaped to broadcast over R, C.
+        P0: (..., R, C) ground-truth assignment, rows sum to 1 (a permutation / relaxation).
+        eta: smoothing weight in [0.05, 0.2]; smaller = sharper target, larger logits.
+            A real hyperparameter — expose in config and tune.
+    Returns u0 (..., R, C), an unconstrained logit matrix (Π_S(u0) recovers ~P0).
     """
-    if torch.is_tensor(t) and t.dim() > 0 and t.dim() == P0.dim() - 2:
-        t = t.reshape(*t.shape, 1, 1)
-    return (1.0 - t) * P0 + t * P_noise
+    m = P0.shape[-1]
+    P_tilde = (1.0 - eta) * P0 + eta / m
+    return safe_log(P_tilde, eps)
+
+
+def cosine_alpha_bar(t: torch.Tensor, s: float = 0.008) -> torch.Tensor:
+    """Cosine VP schedule ᾱ(t) (Nichol & Dhariwal). t in [0, 1]: ᾱ(0)=1 (clean), ᾱ(1)=0.
+
+    ᾱ(t) = f(t)/f(0), f(u) = cos((u + s)/(1 + s)·π/2)². The small offset s keeps ᾱ from
+    dropping too fast near t=0. Accepts a scalar or a batch tensor of times.
+    """
+    if not torch.is_tensor(t):
+        t = torch.tensor(t, dtype=torch.float32)
+    f = lambda u: torch.cos((u + s) / (1.0 + s) * math.pi / 2.0) ** 2
+    return f(t) / f(torch.zeros_like(t))
+
+
+def q_sample(
+    u0: torch.Tensor,
+    t: torch.Tensor,
+    noise: Optional[torch.Tensor] = None,
+    s: float = 0.008,
+) -> torch.Tensor:
+    """Forward marginal in logit space: u_t = √ᾱ(t)·u0 + √(1-ᾱ(t))·ε, ε ~ N(0, I).
+
+    Variance-preserving DDPM noising applied entirely in the unconstrained logit chart —
+    what makes the DDPM/DDIM scaffold legitimate over the polytope. Project with Π_S
+    (log_sinkhorn(u_t).exp()) to get the doubly-stochastic P_t the denoiser reads.
+
+    Args:
+        u0: (..., R, C) clean logit target (from logit_target).
+        t: scalar, or a batch-shaped tensor reshaped to broadcast over R, C.
+        noise: optional ε (same shape as u0); sampled standard normal if None.
+    Returns u_t (..., R, C), an unconstrained logit matrix.
+    """
+    if noise is None:
+        noise = torch.randn_like(u0)
+    ab = cosine_alpha_bar(t, s)
+    if ab.dim() > 0 and ab.dim() == u0.dim() - 2:
+        ab = ab.reshape(*ab.shape, 1, 1)
+    return ab.sqrt() * u0 + (1.0 - ab).clamp_min(0.0).sqrt() * noise
 
 
 def tau_schedule(
@@ -111,13 +157,13 @@ def tau_schedule(
     tau_max: float,
     mode: str = "geometric",
 ) -> torch.Tensor:
-    """Sampler-time temperature vs flow time t (sampler only; training stays temperate).
+    """Sampler-time temperature vs diffusion time t (sampler only; training stays temperate).
 
     Anneals from tau_max at the noisy end (t=1) to tau_min at the clean end (t=0), so
-    the readout sharpens toward a permutation as sampling approaches the data.
+    the projection Π_S sharpens toward a permutation as sampling approaches the data.
 
     Args:
-        t: flow time in [0, 1] (scalar or tensor).
+        t: diffusion time in [0, 1] (scalar or tensor).
         tau_min: temperature at t=0 (clean, sharpest).
         tau_max: temperature at t=1 (noisy, smoothest).
         mode: "geometric" (log-linear) or "linear".
@@ -182,15 +228,36 @@ def _run_tests() -> None:
     ds_err = max((Pn.sum(-1) - 1).abs().max().item(), (Pn.sum(-2) - 1).abs().max().item())
     check("sample_doubly_stochastic is DS", ds_err < 1e-4, f"marg_err={ds_err:.1e}")
 
-    # --- interpolate stays in the polytope; endpoints correct -------------- #
-    P0 = log_sinkhorn(torch.randn(B, n, n), n_iters=30).exp()
+    # --- logit_target: row-stochastic, log finite, recovers the permutation - #
+    perm2 = torch.stack([torch.randperm(n) for _ in range(B)])
+    P0 = torch.zeros(B, n, n).scatter_(-1, perm2.unsqueeze(-1), 1.0)
+    u0 = logit_target(P0, eta=0.1)
+    P_tilde = u0.exp()
+    lt_row = (P_tilde.sum(-1) - 1).abs().max().item()               # rows sum to 1
+    lt_finite = torch.isfinite(u0).all().item()
+    lt_recover = torch.equal(u0.argmax(-1), perm2)                  # argmax = GT match
+    check("logit_target row-stochastic + finite + recovers perm",
+          lt_row < 1e-5 and bool(lt_finite) and lt_recover, f"row_err={lt_row:.1e}")
+
+    # --- cosine_alpha_bar endpoints + monotone decreasing ------------------ #
+    ts = torch.linspace(0, 1, 11)
+    ab = cosine_alpha_bar(ts)
+    ab_ends = abs(ab[0].item() - 1.0) < 1e-6 and ab[-1].item() < 1e-6
+    ab_mono = bool((ab[1:] <= ab[:-1]).all())
+    check("cosine_alpha_bar endpoints + monotone", ab_ends and ab_mono,
+          f"abar(0)={ab[0]:.3f} abar(1)={ab[-1]:.1e}")
+
+    # --- q_sample: VP forward marginal; endpoints + projection is DS -------- #
     t = torch.rand(B)
-    Pt = interpolate(P0, Pn, t)
-    int_err = max((Pt.sum(-1) - 1).abs().max().item(), (Pt.sum(-2) - 1).abs().max().item())
-    e0 = (interpolate(P0, Pn, torch.zeros(B)) - P0).abs().max().item()
-    e1 = (interpolate(P0, Pn, torch.ones(B)) - Pn).abs().max().item()
-    check("interpolate DS + endpoints", int_err < 1e-4 and max(e0, e1) < 1e-6,
-          f"marg_err={int_err:.1e} t0_err={e0:.1e} t1_err={e1:.1e}")
+    eps = torch.randn(B, n, n)
+    u_t = q_sample(u0, t, noise=eps)
+    q0_err = (q_sample(u0, torch.zeros(B), noise=eps) - u0).abs().max().item()  # t=0 -> u0
+    q1_err = (q_sample(u0, torch.ones(B), noise=eps) - eps).abs().max().item()  # t=1 -> noise
+    Pt = log_sinkhorn(u_t, n_iters=30).exp()                        # Π_S(u_t) is DS
+    q_ds = max((Pt.sum(-1) - 1).abs().max().item(), (Pt.sum(-2) - 1).abs().max().item())
+    check("q_sample endpoints + Π_S doubly stochastic",
+          q0_err < 1e-6 and q1_err < 1e-6 and q_ds < 1e-4,
+          f"t0={q0_err:.1e} t1={q1_err:.1e} marg={q_ds:.1e}")
 
     # --- tau_schedule endpoints and monotonicity --------------------------- #
     ts = torch.linspace(0, 1, 11)

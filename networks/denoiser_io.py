@@ -1,13 +1,15 @@
-"""Input/output ends of the matrix denoiser: token construction and the Sinkhorn readout.
+"""Input/output ends of the matrix denoiser: token construction and the logit readout.
 
 TokenConstructor builds the trunk's input tokens from features, anchor coords, P_t
-pull-backs and entropy; SinkhornReadout turns the trunk's output embeddings back into a
-doubly-stochastic assignment. See notes/2026-07-08_denoiser_architecture.md.
+pull-backs and entropy; LogitReadout turns the trunk's output embeddings into the
+predicted clean logit matrix u0_hat (predict-x0). Projection to a doubly-stochastic
+matrix (Sinkhorn) happens outside the network -- at the loss and in the sampler -- per
+the logit-space noising scheme (notes/noising.md).
 """
 import torch
 import torch.nn as nn
 
-from utils.sinkhorn import log_sinkhorn, safe_log
+from utils.sinkhorn import safe_log
 
 
 class TokenConstructor(nn.Module):
@@ -55,40 +57,36 @@ class TokenConstructor(nn.Module):
         return self.proj(x_struct), self.proj(y_struct)
 
 
-class SinkhornReadout(nn.Module):
-    """Turn the trunk's output embeddings into a doubly-stochastic assignment.
+class LogitReadout(nn.Module):
+    """Turn the trunk's output embeddings into the predicted clean logit matrix u0_hat.
 
-        L0      = (E_Y W E_Xᵀ)/√d  +  α·log(clamp(P_t, ε))
-        P0_pred = Sinkhorn(L0 / τ)
+        u0_hat = (E_Y W E_Xᵀ)/√d  +  α·log(clamp(P_t, ε))
+
+    Predict-x0 in logit space: the denoiser outputs a logit matrix, NOT a probability.
+    Projection to the Birkhoff polytope (Sinkhorn Π_S) is external -- applied at the loss
+    (row-CE on Π_S(u0_hat)) and in the sampler (notes/noising.md). This head has no
+    Sinkhorn and no temperature.
 
     - Bilinear W: learned symmetric compatibility metric between the two shapes'
       embeddings (generalises the dot product). Symmetric for pair-swap symmetry
       (property 6); zero-init so the matching score fades in.
     - Skip α·log P_t (Route 3): guarantees P_t-dependence (property 4), restores full
-      rank (property 7; the bilinear is rank ≤ d), and gives the t→0 "return P_t"
-      endpoint. α init 1 so at init L0 = log P_t and Sinkhorn returns P_t exactly
-      (a doubly-stochastic matrix is a Sinkhorn fixed point) — identity at init.
-    - τ: temperate at training time (Lipschitz control); annealed toward sharp only in
-      the sampler, via the forward `tau` override. Compare only post-Sinkhorn
-      quantities — the logits are gauge-ambiguous (property 9).
+      rank (property 7; the bilinear is rank ≤ d), and gives the "return P_t" endpoint.
+      α init 1 so at init u0_hat = log P_t, and since P_t is doubly stochastic it is a
+      Sinkhorn fixed point -> Π_S(u0_hat) = P_t exactly (identity at init, in projected
+      space). The ε-clamp is mandatory (a -inf logit is a dead edge).
+    - Logits are gauge-ambiguous (+u1ᵀ+1vᵀ, invisible to Sinkhorn) -- only compare
+      post-projection quantities (property 9).
     """
-    def __init__(self, dim: int, tau: float = 1.0, n_iters: int = 10, eps: float = 1e-8):
+    def __init__(self, dim: int, eps: float = 1e-8):
         super().__init__()
         self.scale = dim ** -0.5
         self.W = nn.Parameter(torch.zeros(dim, dim))     # bilinear metric, zero-init
         self.alpha = nn.Parameter(torch.tensor(1.0))     # skip strength -> returns P_t at init
-        self.tau = tau
-        self.n_iters = n_iters
         self.eps = eps
 
-    def logits(self, E_x: torch.Tensor, E_y: torch.Tensor, P_t: torch.Tensor) -> torch.Tensor:
-        """Pre-Sinkhorn logits L0 (B, n_y, n_x)."""
+    def forward(self, E_x: torch.Tensor, E_y: torch.Tensor, P_t: torch.Tensor) -> torch.Tensor:
+        """Returns u0_hat (B, n_y, n_x), an unconstrained logit matrix. Project externally."""
         W = self.W + self.W.transpose(-1, -2)            # symmetric -> pair-swap symmetry
         bilinear = (E_y @ W) @ E_x.transpose(-1, -2) * self.scale
         return bilinear + self.alpha * safe_log(P_t, self.eps)
-
-    def forward(self, E_x: torch.Tensor, E_y: torch.Tensor, P_t: torch.Tensor,
-                tau: float | None = None) -> torch.Tensor:
-        """Returns P0_pred (B, n_y, n_x), doubly stochastic. Pass tau to sharpen in the sampler."""
-        tau = self.tau if tau is None else tau
-        return log_sinkhorn(self.logits(E_x, E_y, P_t), n_iters=self.n_iters, tau=tau).exp()

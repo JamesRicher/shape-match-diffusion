@@ -2,7 +2,7 @@
 
 Covers: identity-at-init and pair-swap symmetry of the AdaLN blocks, per-head bias
 acceptance, the conditioning spine, the two bias constructors, token construction, and
-the Sinkhorn readout. Run: python -m networks.denoiser_tests
+the logit readout. Run: python -m networks.denoiser_tests
 """
 import math
 
@@ -10,11 +10,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils.sinkhorn import safe_log, sample_doubly_stochastic
+from utils.sinkhorn import safe_log, sample_doubly_stochastic, log_sinkhorn
 from networks.denoiser_blocks import AdaLNIntraShapeBlock, AdaLNInterShapeBlock
 from networks.denoiser_conditioning import (ConditioningSpine, LogAssignmentBias,
                                             GeodesicKernelBias)
-from networks.denoiser_io import TokenConstructor, SinkhornReadout
+from networks.denoiser_io import TokenConstructor, LogitReadout
 
 
 def _run_tests() -> None:
@@ -192,41 +192,42 @@ def _run_tests() -> None:
     tok(F_xg, F_y, D_x, D_y, P_t)[0].sum().backward()
     check("token gradients flow", F_xg.grad is not None and torch.isfinite(F_xg.grad).all())
 
-    # --- Sinkhorn readout (square: the matcher's actual n_x == n_y case) ---- #
+    # --- logit readout (square: the matcher's actual n_x == n_y case) ------- #
+    # Emits u0_hat (unconstrained logits); Sinkhorn projection Π_S is external.
     N = Ny
     E_x, E_y = torch.randn(B, N, dim), torch.randn(B, N, dim)
     P_sq = sample_doubly_stochastic(N, N, tau=1.0, n_iters=20, batch_shape=(B,))
+    proj = lambda u, tau=1.0: log_sinkhorn(u, n_iters=20, tau=tau).exp()
 
-    ro = SinkhornReadout(dim)
-    P0 = ro(E_x, E_y, P_sq)                                 # (B, N, N)
+    ro = LogitReadout(dim)
+    u0 = ro(E_x, E_y, P_sq)                                 # (B, N, N) logits
+    P0 = proj(u0)
     ds = max((P0.sum(-1) - 1).abs().max().item(), (P0.sum(-2) - 1).abs().max().item())
-    check("readout output doubly stochastic", P0.shape == (B, N, N) and ds < 1e-4,
-          f"marg_err={ds:.1e}")
+    check("readout emits logits; Π_S is doubly stochastic",
+          u0.shape == (B, N, N) and torch.isfinite(u0).all() and ds < 1e-4, f"marg_err={ds:.1e}")
 
-    # identity at init: W=0, alpha=1, tau=1 -> returns P_t exactly (fixed point)
-    id_err = (ro(E_x, E_y, P_sq) - P_sq).abs().max().item()
-    check("readout identity at init (returns P_t)", id_err < 1e-4, f"max dev={id_err:.1e}")
+    # identity at init: W=0, alpha=1 -> u0_hat = log P_t, and Π_S(log P_t) = P_t
+    id_err = (proj(ro(E_x, E_y, P_sq)) - P_sq).abs().max().item()
+    check("readout identity at init (Π_S(u0_hat) = P_t)", id_err < 1e-4, f"max dev={id_err:.1e}")
 
     # de-zero for the structural checks
     nn.init.normal_(ro.W, std=0.1)
     ro.alpha.data.fill_(0.7)
 
-    # pair-swap symmetry: exact on logits (symmetric W), near-exact post-Sinkhorn
-    L = ro.logits(E_x, E_y, P_sq)
-    L_sw = ro.logits(E_y, E_x, P_sq.transpose(-1, -2))
+    # pair-swap symmetry: exact on logits (symmetric W), near-exact post-projection
+    L = ro(E_x, E_y, P_sq)
+    L_sw = ro(E_y, E_x, P_sq.transpose(-1, -2))
     logit_err = (L - L_sw.transpose(-1, -2)).abs().max().item()
-    P0_sw = ro(E_y, E_x, P_sq.transpose(-1, -2))
-    post_err = (ro(E_x, E_y, P_sq) - P0_sw.transpose(-1, -2)).abs().max().item()
+    post_err = (proj(L) - proj(L_sw).transpose(-1, -2)).abs().max().item()
     check("readout pair-swap symmetry (logits exact)", logit_err < 1e-5 and post_err < 1e-3,
-          f"logits={logit_err:.1e} post-sinkhorn={post_err:.1e}")
+          f"logits={logit_err:.1e} post-proj={post_err:.1e}")
 
-    # tau override sharpens; gradients flow to W and alpha
-    P_sharp = ro(E_x, E_y, P_sq, tau=0.05)
-    sharper = P_sharp.max(-1).values.mean() > P0.max(-1).values.mean()
+    # external Π_S sharpens with lower tau; gradients flow to W and alpha
+    sharper = proj(L, tau=0.05).max(-1).values.mean() > proj(L).max(-1).values.mean()
     ro.zero_grad()
-    ro(E_x, E_y, P_sq).sum().backward()
+    proj(ro(E_x, E_y, P_sq)).sum().backward()
     grads_ok = ro.W.grad is not None and ro.alpha.grad is not None
-    check("readout tau-sharpen + gradients", bool(sharper) and grads_ok)
+    check("readout Π_S tau-sharpen + gradients", bool(sharper) and grads_ok)
 
     passed, total = sum(results), len(results)
     print(f"\n{passed}/{total} checks passed")

@@ -53,9 +53,9 @@ class AdaLNIntraShapeBlock(nn.Module):
     """
     def __init__(self, d_model: int, n_heads: int, mlp_ratio: float = 4.0, dropout: float = 0.0):
         super().__init__()
-        self.norm_attn = nn.LayerNorm(d_model, elementwise_affine=False)
+        self.norm_attn = nn.LayerNorm(d_model, elementwise_affine=False) # no LN learning here
         self.attn = MultiHeadAttention(d_model, n_heads, dropout)
-        self.norm_mlp = nn.LayerNorm(d_model, elementwise_affine=False)
+        self.norm_mlp = nn.LayerNorm(d_model, elementwise_affine=False) # no LN learning herer
         self.mlp = FeedForward(d_model, mlp_ratio, dropout)
         self.mod = AdaLNModulation(d_model, n_sublayers=2)
 

@@ -3,6 +3,7 @@ from utils.registry import NETWORK_REGISTRY
 
 # make the registry decorators run
 import networks.shape_matching_transformer
+import networks.matrix_denoiser
 
 __all__ = ["build_network"]
 
