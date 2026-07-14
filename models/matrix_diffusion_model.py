@@ -13,6 +13,7 @@ from collections import OrderedDict
 import numpy as np
 import torch
 from scipy.optimize import linear_sum_assignment
+from tqdm import tqdm
 
 from utils.registry import MODEL_REGISTRY
 from utils.logger import get_root_logger
@@ -178,7 +179,8 @@ class MatrixDiffusionModel(BaseModel):
         self.eval()
         logger = get_root_logger()
         errs, accs, first_data = [], [], None
-        for data in dataloader:
+        pbar = tqdm(dataloader, desc='diffusion eval')
+        for data in pbar:
             if first_data is None:
                 first_data = data
             p2p = self.validate_single(data)                       # (n,) sparse Y->X
@@ -187,6 +189,8 @@ class MatrixDiffusionModel(BaseModel):
             rows = torch.arange(n)
             errs.append(D_x[rows, p2p].cpu().numpy())              # true match of Y row j is X col j
             accs.append((p2p == rows).float().mean().item())
+            # running averages so the bar shows convergence, not just a spinner
+            pbar.set_postfix(err=float(np.concatenate(errs).mean()), acc=float(np.mean(accs)))
 
         errs = np.concatenate(errs)
         result = {'avg_error': float(errs.mean()), 'acc': float(np.mean(accs))}
