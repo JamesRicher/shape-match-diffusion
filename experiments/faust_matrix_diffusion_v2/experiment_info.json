@@ -1,0 +1,85 @@
+{
+  "name": "faust_matrix_diffusion_v2",
+  "model_type": null,
+  "timestamp": "2026-07-14T05:46:53+00:00",
+  "git_commit": "7734626",
+  "device": "cuda",
+  "networks": {
+    "denoiser": {
+      "class": "MatrixDenoiser",
+      "num_params": 3676977,
+      "num_trainable": 3676977
+    }
+  },
+  "config": {
+    "name": "faust_matrix_diffusion_v2",
+    "is_train": true,
+    "datasets": {
+      "train": {
+        "name": "Faust_r",
+        "type": "SparsePairFaustDataset",
+        "phase": "train",
+        "n_sparse": 256
+      },
+      "val": {
+        "name": "Faust_r",
+        "type": "SparsePairFaustDataset",
+        "phase": "test",
+        "n_sparse": 256,
+        "exclude_self": true
+      },
+      "test": {
+        "name": "Faust_r",
+        "type": "SparsePairFaustDataset",
+        "phase": "test",
+        "n_sparse": 256,
+        "exclude_self": true
+      }
+    },
+    "networks": {
+      "denoiser": {
+        "type": "MatrixDenoiser",
+        "feat_dim": 256,
+        "dim": 128,
+        "heads": 4,
+        "depth": 6,
+        "n_anchors": 16,
+        "dropout": 0.0
+      }
+    },
+    "diffusion": {
+      "eta": 0.1,
+      "proj_iters": 6,
+      "schedule_s": 0.008,
+      "sample_steps": 50,
+      "final_iters": 20
+    },
+    "train": {
+      "total_epochs": 30,
+      "log_freq": 20,
+      "optims": {
+        "denoiser": {
+          "type": "AdamW",
+          "lr": 0.001,
+          "weight_decay": 0.0001
+        }
+      },
+      "schedulers": {
+        "denoiser": {
+          "type": "CosineAnnealingLR",
+          "eta_min": 0.0001,
+          "T_max": 30
+        }
+      }
+    },
+    "val": {
+      "subset": 40
+    },
+    "path": {
+      "experiment_root": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/faust_matrix_diffusion_v2",
+      "models": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/faust_matrix_diffusion_v2/models",
+      "results": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/faust_matrix_diffusion_v2/results",
+      "resume_state": null
+    }
+  }
+}

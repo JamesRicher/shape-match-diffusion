@@ -4,7 +4,7 @@
 #   (--num_qual 0 required: validate_single returns a SPARSE p2p; dense qualitative
 #    texture-transfer needs densification, which is deferred — steps.md Step 3.)
 
-name: faust_matrix_diffusion   # experiment dir under experiments/<name>/
+name: faust_matrix_diffusion_v2   # experiment dir under experiments/<name>/
 model_type: MatrixDiffusionModel
 is_train: true
 # device: cuda                 # optional; auto-detected (cuda if available) when omitted
@@ -34,7 +34,7 @@ diffusion:
   final_iters: 20              # Sinkhorn iters for the final DS snap
 
 train:
-  total_epochs: 15
+  total_epochs: 30
   log_freq: 20
   optims:
     denoiser: {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
