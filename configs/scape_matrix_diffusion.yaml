@@ -17,7 +17,9 @@ datasets:
   # (n_sparse <= template coverage T), the shared .vts template is smaller than 512.
   train: {name: Scape_r, type: SparsePairScapeDataset, phase: train, n_sparse: 512}
   val:   {name: Scape_r, type: SparsePairScapeDataset, phase: test,  n_sparse: 512, exclude_self: true}
-  test:  {name: Scape_r, type: SparsePairScapeDataset, phase: test,  n_sparse: 512, exclude_self: true}
+  # test also loads eigenbases for the ZoomOut densifier (num_evecs >= densifier.k_final).
+  # evecs stay OFF for train/val so training is untouched (only evaluate.py reads test).
+  test:  {name: Scape_r, type: SparsePairScapeDataset, phase: test,  n_sparse: 512, exclude_self: true, ret_evecs: true, num_evecs: 200}
 
 networks:
   denoiser:
@@ -36,6 +38,21 @@ diffusion:
   schedule_s: 0.008            # cosine ᾱ offset
   sample_steps: 50             # DDIM reverse steps at inference
   final_iters: 20              # Sinkhorn iters for the final DS snap
+
+# ZoomOut spectral densifier: lifts the sparse p2p to a dense whole-shape map. A non-learned
+# post-process used only for reporting-time dense MGE (evaluate.py); never in training.
+densifier:
+  type: ZoomOutDensifier
+  k_start: 20
+  k_step: 10
+  k_final: 200                 # must be <= datasets.test.num_evecs
+
+# which stats validation reports. Dense whole-shape MGE is OFF here so mid-training validation
+# stays the fast sparse dev metric (and needs no evecs). evaluate.py forces dense-only itself
+# (under independent-FPS honest sampling), so this only governs training-time validation.
+eval:
+  sparse: true
+  dense: false
 
 train:
   # Iteration-matched to the FAUST diffusion run: FAUST is 30 epochs x 6400 train pairs
