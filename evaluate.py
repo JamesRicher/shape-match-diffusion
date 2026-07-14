@@ -116,6 +116,12 @@ def evaluate(opt, ckpt, args):
             f'checkpoint not found: {ckpt}\nTrain first, or pass --checkpoint <path>.')
 
     test_set = build_dataset(opt['datasets']['test'])
+    # Honest eval for the sparse matcher: FPS each shape independently so no ground truth
+    # enters instance construction (training/dev use GT-consistent bijective FPS). Enabled
+    # only here, never in training. Non-sparse datasets lack the flag and are unaffected.
+    if hasattr(test_set, 'independent_fps'):
+        test_set.independent_fps = True
+        logger.info('Independent-FPS eval enabled (no GT in sparse sampling; dense MGE only).')
     test_loader = DataLoader(test_set, batch_size=1, shuffle=False,
                              collate_fn=_single_collate, num_workers=args.num_workers)
 
@@ -124,6 +130,11 @@ def evaluate(opt, ckpt, args):
 
     # the constructor loads `ckpt` (net-only, since is_train is False)
     model = build_model(opt)
+    # Under independent FPS there is no bijective sparse GT, so the sparse metric is undefined:
+    # report dense whole-shape MGE only (needs opt['densifier']; validation raises if absent).
+    if getattr(test_set, 'independent_fps', False) and hasattr(model, 'report_dense'):
+        model.report_sparse = False
+        model.report_dense = True
     logger.info(f'Evaluating "{opt["name"]}" on {len(test_set)} test pairs '
                 f'(checkpoint: {ckpt}, device: {model.device}).')
 

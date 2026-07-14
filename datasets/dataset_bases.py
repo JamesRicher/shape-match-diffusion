@@ -272,6 +272,13 @@ class SparsePairShapeDataset(PairShapeDataset):
             epochs, doubles as augmentation); anything else uses a fixed start
             (index-derived) for comparable val/test numbers.
         exclude_self: forwarded to PairShapeDataset (drop the (i, i) self-pairs).
+
+    independent_fps (attribute, default False): eval-only honest-sampling mode. When True,
+    each shape is FPS'd on its OWN geometry (Y is NOT the GT image of X's points), so no
+    ground truth enters instance construction and there is no bijective sparse target -- the
+    realistic test setup. Emits sparse tokens but no gt_perm/fps_idx; only dense MGE (GT via
+    .vts, inside the metric) is a valid score. Left False for training and the fast dev
+    metric; flipped on solely by evaluate.py so it can never leak into training.
     """
     def __init__(self, dataset, n_sparse: int = 128, phase: str = "train", exclude_self: bool = False):
         super().__init__(dataset, exclude_self=exclude_self)
@@ -279,10 +286,28 @@ class SparsePairShapeDataset(PairShapeDataset):
             "SparsePairShapeDataset needs corr, dist and feats"
         self.n_sparse = n_sparse
         self.train = (phase == "train")
+        self.independent_fps = False
+
+    def _independent_item(self, item, x, y):
+        """FPS each shape on its own geometry (fixed start, deterministic). No gt_perm: the
+        two independently sampled sets have no bijective correspondence. See independent_fps."""
+        idx_x = torch.from_numpy(fps(x['verts'].numpy(), self.n_sparse, 0)).long()
+        idx_y = torch.from_numpy(fps(y['verts'].numpy(), self.n_sparse, 0)).long()
+        for shape, idx in ((x, idx_x), (y, idx_y)):
+            shape['sparse'] = {
+                'idx': idx,
+                'feat': shape['feat'][idx],
+                'verts': shape['verts'][idx],
+                'dist': shape['dist'][idx][:, idx],
+            }
+        return item
 
     def __getitem__(self, index):
         item = super().__getitem__(index)          # {'first', 'second'} full dicts
         x, y = item['first'], item['second']
+
+        if self.independent_fps:
+            return self._independent_item(item, x, y)
 
         corr_x = x['corr'].numpy()                 # (T,) template point -> vertex on X
         corr_y = y['corr'].numpy()
