@@ -1,0 +1,14 @@
+{
+  "name": "faust_matrix_diffusion_v2",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/faust_matrix_diffusion_v2/models/final.pth",
+  "dataset": {
+    "name": "Faust_r",
+    "type": "SparsePairFaustDataset",
+    "phase": "test",
+    "n_sparse": 256,
+    "exclude_self": true
+  },
+  "num_test_pairs": 380,
+  "avg_error": 0.002052075695246458,
+  "acc": 0.9827713815789474
+}
