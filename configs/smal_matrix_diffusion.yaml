@@ -50,8 +50,9 @@ densifier:
   k_final: 200                 # must be <= datasets.test.num_evecs
 
 # which stats validation reports. Dense whole-shape MGE is OFF here so mid-training validation
-# stays the fast sparse dev metric (and needs no evecs). evaluate.py forces dense-only itself
-# (under independent-FPS honest sampling), so this only governs training-time validation.
+# stays the fast sparse dev metric (and needs no evecs). This governs training-time validation
+# only: evaluate.py runs its own two passes (honest independent-FPS dense MGE + bijective-FPS
+# sparse avg_error/acc), reporting both regardless of these flags.
 eval:
   sparse: true
   dense: false

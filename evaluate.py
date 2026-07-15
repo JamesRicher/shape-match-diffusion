@@ -116,12 +116,10 @@ def evaluate(opt, ckpt, args):
             f'checkpoint not found: {ckpt}\nTrain first, or pass --checkpoint <path>.')
 
     test_set = build_dataset(opt['datasets']['test'])
-    # Honest eval for the sparse matcher: FPS each shape independently so no ground truth
-    # enters instance construction (training/dev use GT-consistent bijective FPS). Enabled
-    # only here, never in training. Non-sparse datasets lack the flag and are unaffected.
-    if hasattr(test_set, 'independent_fps'):
-        test_set.independent_fps = True
-        logger.info('Independent-FPS eval enabled (no GT in sparse sampling; dense MGE only).')
+    # Sparse matcher (has independent_fps): the two eval stats live in different sampling
+    # regimes, so we report them in two passes (see below). Non-sparse datasets lack the
+    # flag and take the plain single pass in the else branch.
+    sparse_matcher = hasattr(test_set, 'independent_fps')
     test_loader = DataLoader(test_set, batch_size=1, shuffle=False,
                              collate_fn=_single_collate, num_workers=args.num_workers)
 
@@ -130,20 +128,42 @@ def evaluate(opt, ckpt, args):
 
     # the constructor loads `ckpt` (net-only, since is_train is False)
     model = build_model(opt)
-    # Under independent FPS there is no bijective sparse GT, so the sparse metric is undefined:
-    # report dense whole-shape MGE only (needs opt['densifier']; validation raises if absent).
-    if getattr(test_set, 'independent_fps', False) and hasattr(model, 'report_dense'):
-        model.report_sparse = False
-        model.report_dense = True
+    sparse_matcher = sparse_matcher and hasattr(model, 'report_sparse')
     logger.info(f'Evaluating "{opt["name"]}" on {len(test_set)} test pairs '
                 f'(checkpoint: {ckpt}, device: {model.device}).')
 
     results_dir = opt['path']['results']
     os.makedirs(results_dir, exist_ok=True)
 
-    # pure evaluation pass. out_dir sends pck.png / pck.npy to results/ (the same
-    # dir stats.json is written to).
-    metrics = model.validation(test_loader, out_dir=results_dir)
+    if sparse_matcher:
+        # Two passes, because the sparse and dense stats need different sparse sampling:
+        #   1) dense whole-shape MGE under honest independent FPS (each shape's FPS points
+        #      chosen on its own geometry, no GT) -- the reporting metric.
+        #   2) sparse FPS-point avg_error + acc under GT-consistent bijective FPS, where
+        #      sparse Y point j is built to match sparse X point j (identity gt_perm), so
+        #      the diagonal error/accuracy are defined. This uses GT in point selection and
+        #      is a dev diagnostic, not an honest number -- keys are prefixed 'sparse_'.
+        metrics = {}
+
+        if getattr(model, 'densifier', None) is not None:
+            test_set.independent_fps = True
+            model.report_sparse, model.report_dense = False, True
+            logger.info('[1/2] dense MGE (honest independent FPS)')
+            metrics.update(model.validation(test_loader, out_dir=results_dir))
+        else:
+            logger.info('[1/2] dense MGE skipped (no densifier configured)')
+
+        test_set.independent_fps = False
+        model.report_sparse, model.report_dense = True, False
+        logger.info('[2/2] sparse stats (bijective FPS)')
+        sparse_metrics = model.validation(test_loader, out_dir=None)
+        for k, v in sparse_metrics.items():
+            # avg_error/acc are the sparse stats; keep them explicit about the regime.
+            metrics[f'sparse_{k}' if k in ('avg_error', 'acc') else k] = v
+    else:
+        # pure evaluation pass. out_dir sends pck.png / pck.npy to results/ (the same
+        # dir stats.json is written to).
+        metrics = model.validation(test_loader, out_dir=results_dir)
 
     # qualitative texture-transfer figures on a few random pairs (results/qual/)
     generate_qualitative(model, test_set, os.path.join(results_dir, 'qual'),

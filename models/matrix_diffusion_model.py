@@ -69,12 +69,18 @@ class MatrixDiffusionModel(BaseModel):
         ignore it, and the training/diagnostic paths that need it always have gt_perm."""
         xs, ys = data['first']['sparse'], data['second']['sparse']
         b = lambda z: (z.unsqueeze(0) if z.dim() == 2 else z).to(self.device).float()
-        F_x, F_y = b(xs['feat']), b(ys['feat'])
+        D_x, D_y = b(xs['dist']), b(ys['dist'])
+        if 'extractor' in self.networks:                            # learnable GCN features
+            ext = self.networks['extractor']
+            F_x = ext(xs['verts'].to(self.device).float(), D_x[0])
+            F_y = ext(ys['verts'].to(self.device).float(), D_y[0])
+        else:                                                       # frozen .npy features
+            F_x, F_y = b(xs['feat']), b(ys['feat'])
         if self.ablate_features:                                    # P_t-only diagnostic
             F_x, F_y = torch.zeros_like(F_x), torch.zeros_like(F_y)
         gt = data.get('gt_perm')
         P0 = b(gt) if gt is not None else None
-        return (F_x, F_y, b(xs['dist']), b(ys['dist']), P0)
+        return (F_x, F_y, D_x, D_y, P0)
 
     def _row_logprob(self, u):
         """Π_S(u) as row-normalised log-probabilities (rows sum to 1 exactly, for CE).

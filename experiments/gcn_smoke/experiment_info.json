@@ -1,0 +1,118 @@
+{
+  "name": "gcn_smoke",
+  "model_type": null,
+  "timestamp": "2026-07-15T13:24:25+00:00",
+  "git_commit": "0f5cc51",
+  "device": "cpu",
+  "networks": {
+    "extractor": {
+      "class": "GCNFeatureExtractor",
+      "num_params": 10160,
+      "num_trainable": 10160
+    },
+    "denoiser": {
+      "class": "MatrixDenoiser",
+      "num_params": 3627825,
+      "num_trainable": 3627825
+    }
+  },
+  "config": {
+    "name": "gcn_smoke",
+    "is_train": true,
+    "datasets": {
+      "train": {
+        "name": "Faust_r",
+        "type": "SparsePairFaustDataset",
+        "phase": "train",
+        "n_sparse": 256
+      },
+      "val": {
+        "name": "Faust_r",
+        "type": "SparsePairFaustDataset",
+        "phase": "test",
+        "n_sparse": 256,
+        "exclude_self": true
+      },
+      "test": {
+        "name": "Faust_r",
+        "type": "SparsePairFaustDataset",
+        "phase": "test",
+        "n_sparse": 256,
+        "exclude_self": true,
+        "ret_evecs": true,
+        "num_evecs": 200
+      }
+    },
+    "networks": {
+      "extractor": {
+        "type": "GCNFeatureExtractor",
+        "out_dim": 64,
+        "node_in": "xyz",
+        "knn": 8
+      },
+      "denoiser": {
+        "type": "MatrixDenoiser",
+        "feat_dim": 64,
+        "dim": 128,
+        "heads": 4,
+        "depth": 6,
+        "n_anchors": 16,
+        "dropout": 0.0
+      }
+    },
+    "diffusion": {
+      "eta": 0.1,
+      "proj_iters": 6,
+      "schedule_s": 0.008,
+      "sample_steps": 50,
+      "final_iters": 20
+    },
+    "densifier": {
+      "type": "ZoomOutDensifier",
+      "k_start": 20,
+      "k_step": 10,
+      "k_final": 200
+    },
+    "eval": {
+      "sparse": true,
+      "dense": false
+    },
+    "train": {
+      "total_epochs": 30,
+      "log_freq": 20,
+      "optims": {
+        "extractor": {
+          "type": "AdamW",
+          "lr": 0.001,
+          "weight_decay": 0.0001
+        },
+        "denoiser": {
+          "type": "AdamW",
+          "lr": 0.001,
+          "weight_decay": 0.0001
+        }
+      },
+      "schedulers": {
+        "extractor": {
+          "type": "CosineAnnealingLR",
+          "eta_min": 0.0001,
+          "T_max": 30
+        },
+        "denoiser": {
+          "type": "CosineAnnealingLR",
+          "eta_min": 0.0001,
+          "T_max": 30
+        }
+      }
+    },
+    "val": {
+      "subset": 40
+    },
+    "path": {
+      "experiment_root": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/gcn_smoke",
+      "models": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/gcn_smoke/models",
+      "results": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/gcn_smoke/results",
+      "resume_state": null
+    }
+  }
+}

@@ -165,8 +165,14 @@ def train(opt, args):
 
     train_set, train_loader, val_loader = build_dataloaders(opt, args.num_workers)
 
-    # match each network's input dim to the actual per-vertex feature dim
-    autofill_feat_dim(opt, int(train_set[0]['first']['feat'].shape[-1]))
+    # match each network's input dim to the actual per-vertex feature dim. Only touch the
+    # data when a network still has a null in_dim/feat_dim -- a learnable feature extractor
+    # sets feat_dim explicitly (= its out_dim) and may not request feats at all.
+    needs_autofill = any(net_cfg.get(key) is None
+                         for net_cfg in opt['networks'].values()
+                         for key in ('in_dim', 'feat_dim') if key in net_cfg)
+    if needs_autofill:
+        autofill_feat_dim(opt, int(train_set[0]['first']['feat'].shape[-1]))
 
     model = build_model(opt)
     logger.info(f'Start training "{opt["name"]}" for {opt["train"]["total_epochs"]} epochs '
