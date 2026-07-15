@@ -56,9 +56,8 @@ eval:
 
 train:
   # Iteration-matched to the FAUST diffusion run: FAUST is 30 epochs x 6400 train pairs
-  # (80 shapes) = 192k iters. SCAPE has 2601 train pairs (51 shapes), so 192k / 2601 ~=
-  # 74 epochs gives the equivalent number of optimizer steps.
-  total_epochs: 74
+  # (80 shapes) = 192k iters. SCAPE has 2601 train pairs (51 shapes)
+  total_epochs: 60
   log_freq: 20
   optims:
     denoiser: {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
