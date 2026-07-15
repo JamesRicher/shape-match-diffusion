@@ -15,11 +15,17 @@ import time
 
 import torch
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from utils.options import load_yaml
 from datasets import build_dataset
 from networks import build_network
+
+
+def _collate(batch):
+    """batch_size=1 collate: shape pairs hold ragged/sparse tensors, so train one at a time."""
+    return batch[0]
 
 
 def contrastive_loss(fx, fy, tau):
@@ -62,6 +68,8 @@ def main():
     p.add_argument('--device', default=None)
     p.add_argument('--eval_limit', type=int, default=40, help='val pairs per eval')
     p.add_argument('--max_steps', type=int, default=None, help='cap train steps/epoch (smoke)')
+    p.add_argument('--num_workers', type=int, default=8,
+                   help='DataLoader workers that prefetch/overlap the geodesic loads (0 = sync)')
     p.add_argument('--out', default='extractor_faust.pth')
     args = p.parse_args()
 
@@ -70,6 +78,15 @@ def main():
 
     train_set = build_dataset(opt['datasets']['train'])
     val_set = build_dataset(opt['datasets']['val'])
+
+    # Prefetching loader: the per-shape geodesic matrices are large and the dataset's LRU
+    # cache is small, so loading dominates. Workers overlap those loads with GPU compute
+    # (mirrors train.py); persistent_workers keeps the OS page cache / per-worker LRU warm
+    # across epochs. Each item is a full shape pair (batch_size=1, ragged tensors).
+    train_loader = DataLoader(
+        train_set, batch_size=1, shuffle=True, collate_fn=_collate,
+        num_workers=args.num_workers, persistent_workers=args.num_workers > 0,
+        prefetch_factor=(4 if args.num_workers > 0 else None), pin_memory=(device.type == 'cuda'))
 
     ext_cfg = dict(opt['networks']['extractor'])
     if args.node_in is not None:
@@ -82,18 +99,18 @@ def main():
     print(f'extractor {ext.__class__.__name__} ({n_params:,} params) on {device}; '
           f'{len(train_set)} train / {len(val_set)} val pairs')
 
+    total = args.max_steps or len(train_loader)
     best_val = -1.0
     for epoch in range(args.epochs):
-        order = torch.randperm(len(train_set)).tolist()
-        if args.max_steps is not None:
-            order = order[:args.max_steps]
         run_loss = run_acc = 0.0
         t0 = time.time()
         # live progress bar: running loss/acc + it/s + ETA for the epoch (tqdm), like the
         # rest of the repo's loops. postfix updates every step; leave=False keeps the log tidy.
-        pbar = tqdm(order, desc=f'epoch {epoch:3d}/{args.epochs - 1}', leave=False)
-        for step, idx in enumerate(pbar):
-            pair = train_set[idx]
+        pbar = tqdm(train_loader, total=total, desc=f'epoch {epoch:3d}/{args.epochs - 1}', leave=False)
+        step = 0
+        for pair in pbar:
+            if args.max_steps is not None and step >= args.max_steps:
+                break
             fx = _features(ext, pair['first'])
             fy = _features(ext, pair['second'])
             loss, acc = contrastive_loss(fx, fy, args.tau)
@@ -103,11 +120,12 @@ def main():
             torch.nn.utils.clip_grad_norm_(ext.parameters(), 1.0)
             optim.step()
             run_loss += loss.item(); run_acc += acc.item()
-            pbar.set_postfix(loss=f'{run_loss/(step+1):.3f}', acc=f'{run_acc/(step+1):.3f}',
+            step += 1
+            pbar.set_postfix(loss=f'{run_loss/step:.3f}', acc=f'{run_acc/step:.3f}',
                              lr=f'{sched.get_last_lr()[0]:.1e}')
         sched.step()
 
-        n = len(order)
+        n = step
         val_acc = evaluate(ext, val_set, device, args.tau, args.eval_limit)
         best = val_acc > best_val
         best_val = max(best_val, val_acc)
