@@ -1,19 +1,19 @@
 {
   "name": "gcn_smoke",
   "model_type": null,
-  "timestamp": "2026-07-15T13:24:25+00:00",
-  "git_commit": "0f5cc51",
+  "timestamp": "2026-07-15T15:12:54+00:00",
+  "git_commit": "d007170",
   "device": "cpu",
   "networks": {
     "extractor": {
       "class": "GCNFeatureExtractor",
-      "num_params": 10160,
-      "num_trainable": 10160
+      "num_params": 51504,
+      "num_trainable": 51504
     },
     "denoiser": {
       "class": "MatrixDenoiser",
-      "num_params": 3627825,
-      "num_trainable": 3627825
+      "num_params": 3644209,
+      "num_trainable": 3644209
     }
   },
   "config": {
@@ -46,13 +46,25 @@
     "networks": {
       "extractor": {
         "type": "GCNFeatureExtractor",
-        "out_dim": 64,
+        "out_dim": 128,
         "node_in": "xyz",
+        "hidden": [
+          16,
+          32,
+          64
+        ],
+        "hops": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "patch_size": 64,
         "knn": 8
       },
       "denoiser": {
         "type": "MatrixDenoiser",
-        "feat_dim": 64,
+        "feat_dim": 128,
         "dim": 128,
         "heads": 4,
         "depth": 6,

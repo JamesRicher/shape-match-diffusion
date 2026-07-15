@@ -29,15 +29,19 @@ def contrastive_loss(fx, fy, tau):
     return loss, acc
 
 
+def _features(ext, shape):
+    """Run the patch extractor on one shape: full verts/dist + FPS idx -> (n, out_dim)."""
+    return ext(shape['verts'], shape['dist'], shape['sparse']['idx'])[0]
+
+
 @torch.no_grad()
 def evaluate(ext, dataset, device, tau, limit=None):
     ext.eval()
     accs = []
     for i in range(len(dataset) if limit is None else min(limit, len(dataset))):
-        xs = dataset[i]['first']['sparse']
-        ys = dataset[i]['second']['sparse']
-        fx = ext(xs['verts'].to(device).float(), xs['dist'].to(device).float())[0]
-        fy = ext(ys['verts'].to(device).float(), ys['dist'].to(device).float())[0]
+        pair = dataset[i]
+        fx = _features(ext, pair['first'])
+        fy = _features(ext, pair['second'])
         _, acc = contrastive_loss(fx, fy, tau)
         accs.append(acc.item())
     ext.train()
@@ -54,6 +58,7 @@ def main():
     p.add_argument('--node_in', default=None, help="override extractor node_in (xyz|anchor)")
     p.add_argument('--device', default=None)
     p.add_argument('--eval_limit', type=int, default=40, help='val pairs per eval')
+    p.add_argument('--max_steps', type=int, default=None, help='cap train steps/epoch (smoke)')
     p.add_argument('--out', default='extractor_faust.pth')
     args = p.parse_args()
 
@@ -75,13 +80,14 @@ def main():
           f'{len(train_set)} train / {len(val_set)} val pairs')
 
     for epoch in range(args.epochs):
-        order = torch.randperm(len(train_set))
+        order = torch.randperm(len(train_set)).tolist()
+        if args.max_steps is not None:
+            order = order[:args.max_steps]
         run_loss = run_acc = 0.0
-        for step, idx in enumerate(order.tolist()):
-            xs = train_set[idx]['first']['sparse']
-            ys = train_set[idx]['second']['sparse']
-            fx = ext(xs['verts'].to(device).float(), xs['dist'].to(device).float())[0]
-            fy = ext(ys['verts'].to(device).float(), ys['dist'].to(device).float())[0]
+        for step, idx in enumerate(order):
+            pair = train_set[idx]
+            fx = _features(ext, pair['first'])
+            fy = _features(ext, pair['second'])
             loss, acc = contrastive_loss(fx, fy, args.tau)
 
             optim.zero_grad()

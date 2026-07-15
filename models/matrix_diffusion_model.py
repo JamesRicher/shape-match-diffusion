@@ -67,13 +67,14 @@ class MatrixDiffusionModel(BaseModel):
         Returns F_x, F_y (B,n,d_f); D_x, D_y (B,n,n); P0 (B,n_y,n_x) or None.
         P0 is None under independent-FPS eval (no bijective sparse GT); sampling paths
         ignore it, and the training/diagnostic paths that need it always have gt_perm."""
-        xs, ys = data['first']['sparse'], data['second']['sparse']
+        dx, dy = data['first'], data['second']
+        xs, ys = dx['sparse'], dy['sparse']
         b = lambda z: (z.unsqueeze(0) if z.dim() == 2 else z).to(self.device).float()
         D_x, D_y = b(xs['dist']), b(ys['dist'])
         if 'extractor' in self.networks:                            # learnable GCN features
-            ext = self.networks['extractor']
-            F_x = ext(xs['verts'].to(self.device).float(), D_x[0])
-            F_y = ext(ys['verts'].to(self.device).float(), D_y[0])
+            ext = self.networks['extractor']                        # local full-mesh patches
+            F_x = ext(dx['verts'], dx['dist'], xs['idx'])           # per FPS point (1, n, d)
+            F_y = ext(dy['verts'], dy['dist'], ys['idx'])
         else:                                                       # frozen .npy features
             F_x, F_y = b(xs['feat']), b(ys['feat'])
         if self.ablate_features:                                    # P_t-only diagnostic

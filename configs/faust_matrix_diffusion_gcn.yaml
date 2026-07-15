@@ -13,15 +13,19 @@ datasets:
   test:  {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 256, exclude_self: true, ret_evecs: true, num_evecs: 200}
 
 networks:
-  # Learnable per-point features from sparse coords + geodesics (geodesic-kNN graph).
+  # Learnable per-FPS-point features from local full-mesh patches (patch = nearest
+  # `patch_size` mesh vertices by geodesic distance, convolved then max-pooled).
   extractor:
     type: GCNFeatureExtractor
-    out_dim: 64
-    node_in: xyz          # or 'anchor' for a fully-intrinsic extractor
-    knn: 8
+    out_dim: 128
+    node_in: xyz          # or 'anchor' for a fully-intrinsic (geodesic radial) extractor
+    hidden: [16, 32, 64]  # widths in->16->32->64->out_dim (4 TAGConv layers)
+    hops: [1, 2, 3, 4]    # per-layer hop counts K (len == len(hidden) + 1)
+    patch_size: 64        # full-mesh vertices per patch (local receptive field)
+    knn: 8                # within-patch graph neighbours
   denoiser:
     type: MatrixDenoiser
-    feat_dim: 64          # = extractor.out_dim (explicit -> autofill leaves it alone)
+    feat_dim: 128         # = extractor.out_dim (explicit -> autofill leaves it alone)
     dim: 128
     heads: 4
     depth: 6
