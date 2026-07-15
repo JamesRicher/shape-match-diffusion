@@ -11,8 +11,11 @@ matrix-diffusion config.
 """
 import argparse
 
+import time
+
 import torch
 import torch.nn.functional as F
+from tqdm import tqdm
 
 from utils.options import load_yaml
 from datasets import build_dataset
@@ -79,12 +82,17 @@ def main():
     print(f'extractor {ext.__class__.__name__} ({n_params:,} params) on {device}; '
           f'{len(train_set)} train / {len(val_set)} val pairs')
 
+    best_val = -1.0
     for epoch in range(args.epochs):
         order = torch.randperm(len(train_set)).tolist()
         if args.max_steps is not None:
             order = order[:args.max_steps]
         run_loss = run_acc = 0.0
-        for step, idx in enumerate(order):
+        t0 = time.time()
+        # live progress bar: running loss/acc + it/s + ETA for the epoch (tqdm), like the
+        # rest of the repo's loops. postfix updates every step; leave=False keeps the log tidy.
+        pbar = tqdm(order, desc=f'epoch {epoch:3d}/{args.epochs - 1}', leave=False)
+        for step, idx in enumerate(pbar):
             pair = train_set[idx]
             fx = _features(ext, pair['first'])
             fy = _features(ext, pair['second'])
@@ -95,15 +103,22 @@ def main():
             torch.nn.utils.clip_grad_norm_(ext.parameters(), 1.0)
             optim.step()
             run_loss += loss.item(); run_acc += acc.item()
+            pbar.set_postfix(loss=f'{run_loss/(step+1):.3f}', acc=f'{run_acc/(step+1):.3f}',
+                             lr=f'{sched.get_last_lr()[0]:.1e}')
         sched.step()
 
         n = len(order)
         val_acc = evaluate(ext, val_set, device, args.tau, args.eval_limit)
+        best = val_acc > best_val
+        best_val = max(best_val, val_acc)
         print(f'epoch {epoch:3d} | train loss {run_loss/n:.4f} acc {run_acc/n:.3f} '
-              f'| val acc {val_acc:.3f} | lr {sched.get_last_lr()[0]:.2e}')
+              f'| val acc {val_acc:.3f} (best {best_val:.3f}) | lr {sched.get_last_lr()[0]:.2e} '
+              f'| {time.time() - t0:.1f}s' + ('  <- new best, saved' if best else ''))
+        if best:                                    # keep the best-val checkpoint, not just last
+            torch.save({'networks': {'extractor': ext.state_dict()}}, args.out)
 
-    torch.save({'networks': {'extractor': ext.state_dict()}}, args.out)
-    print(f'saved -> {args.out}  (load into a run via path.resume_state; the key is "extractor")')
+    print(f'done. best val acc {best_val:.3f}. saved -> {args.out}  '
+          f'(load into a run via path.resume_state; the key is "extractor")')
 
 
 if __name__ == '__main__':
