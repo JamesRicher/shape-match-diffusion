@@ -1,0 +1,15 @@
+{
+  "name": "scape_matrix_diffusion",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/scape_matrix_diffusion/models/final.pth",
+  "dataset": {
+    "name": "Scape_r",
+    "type": "SparsePairScapeDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.0424332320690155
+}
