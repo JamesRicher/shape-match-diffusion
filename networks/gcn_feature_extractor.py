@@ -24,6 +24,22 @@ import torch.nn.functional as F
 from utils.registry import NETWORK_REGISTRY
 
 
+def build_patches(verts: torch.Tensor, dist: torch.Tensor, idx: torch.Tensor, patch_size: int):
+    """Gather local full-mesh patches for each FPS point. Param-free, so it can run in a
+    DataLoader worker (off the main thread) to overlap the topk/gather with GPU compute.
+
+    Returns (D_patch (n,p,p), patch_verts (n,p,3), center_verts (n,3)) -- small tensors, so
+    the caller can then drop the full (N,N) dist instead of shipping it to the main process.
+    Column 0 of each patch is the FPS centre itself (nearest to itself, geodesic 0)."""
+    idx = idx.long()
+    p = min(patch_size, dist.shape[0])
+    _, patch_idx = torch.topk(dist[idx], p, dim=-1, largest=False)              # (n, p)
+    D_patch = dist[patch_idx.unsqueeze(-1), patch_idx.unsqueeze(-2)].float()    # (n, p, p)
+    patch_verts = verts[patch_idx].float()                                      # (n, p, 3)
+    center_verts = verts[idx].float()                                           # (n, 3)
+    return D_patch, patch_verts, center_verts
+
+
 class TAGConv(nn.Module):
     """Topology-adaptive graph conv: sum_{k=0..K} (A_hat^k x) Theta_k.
 
@@ -118,17 +134,11 @@ class GCNFeatureExtractor(nn.Module):
         radial = D_patch[..., :1]                                   # (n,p,1)
         return radial / radial.amax(-2, keepdim=True).clamp_min(self.eps)
 
-    def forward(self, verts: torch.Tensor, dist: torch.Tensor, idx: torch.Tensor) -> torch.Tensor:
-        """verts (N,3), dist (N,N) full mesh; idx (n,) FPS vertex indices. Returns (1,n,out_dim)."""
+    def forward(self, patches) -> torch.Tensor:
+        """patches = (D_patch (n,p,p), patch_verts (n,p,3), center_verts (n,3)) from
+        build_patches, typically produced in a DataLoader worker. Returns (1, n, out_dim)."""
         dev = self.convs[0].lins[0].weight.device
-        idx = idx.to(dist.device).long()
-        p = min(self.patch_size, dist.shape[0])
-        # patch = p nearest full-mesh vertices to each FPS centre (column 0 is the centre)
-        _, patch_idx = torch.topk(dist[idx], p, dim=-1, largest=False)          # (n, p)
-        # gather on dist's device (keeps the full (N,N) off the GPU), then move small patches
-        D_patch = dist[patch_idx.unsqueeze(-1), patch_idx.unsqueeze(-2)].to(dev).float()
-        patch_verts = verts[patch_idx].to(dev).float()                         # (n, p, 3)
-        center_verts = verts[idx].to(dev).float()                              # (n, 3)
+        D_patch, patch_verts, center_verts = (t.to(dev, non_blocking=True) for t in patches)
 
         A_hat = self._adjacency(D_patch)
         x = self._node_features(patch_verts, center_verts, D_patch)
@@ -138,3 +148,8 @@ class GCNFeatureExtractor(nn.Module):
             if i < last:
                 x = F.relu(x)
         return x.amax(dim=1).unsqueeze(0)                # max-pool patch -> (1, n, out_dim)
+
+    def extract(self, verts: torch.Tensor, dist: torch.Tensor, idx: torch.Tensor) -> torch.Tensor:
+        """Convenience: patchify (on the main thread) then run. Used where no worker-side
+        patchification is available (e.g. the diffusion model's _sparse_inputs)."""
+        return self.forward(build_patches(verts, dist, idx, self.patch_size))

@@ -12,6 +12,7 @@ matrix-diffusion config.
 import argparse
 
 import time
+from functools import partial
 
 import torch
 import torch.nn.functional as F
@@ -21,11 +22,19 @@ from tqdm import tqdm
 from utils.options import load_yaml
 from datasets import build_dataset
 from networks import build_network
+from networks.gcn_feature_extractor import build_patches
 
 
-def _collate(batch):
-    """batch_size=1 collate: shape pairs hold ragged/sparse tensors, so train one at a time."""
-    return batch[0]
+def _patch_collate(batch, patch_size):
+    """batch_size=1 collate that patchifies BOTH shapes in the worker and drops the full
+    (N,N) geodesic. This moves the topk/gather off the main thread and shrinks worker->main
+    IPC to the small per-patch tensors. Returns {'first': patches, 'second': patches}."""
+    pair = batch[0]
+    out = {}
+    for key in ('first', 'second'):
+        s = pair[key]
+        out[key] = build_patches(s['verts'], s['dist'], s['sparse']['idx'], patch_size)
+    return out
 
 
 def contrastive_loss(fx, fy, tau):
@@ -38,19 +47,14 @@ def contrastive_loss(fx, fy, tau):
     return loss, acc
 
 
-def _features(ext, shape):
-    """Run the patch extractor on one shape: full verts/dist + FPS idx -> (n, out_dim)."""
-    return ext(shape['verts'], shape['dist'], shape['sparse']['idx'])[0]
-
-
 @torch.no_grad()
 def evaluate(ext, dataset, device, tau, limit=None):
     ext.eval()
     accs = []
     for i in range(len(dataset) if limit is None else min(limit, len(dataset))):
-        pair = dataset[i]
-        fx = _features(ext, pair['first'])
-        fy = _features(ext, pair['second'])
+        s0, s1 = dataset[i]['first'], dataset[i]['second']
+        fx = ext.extract(s0['verts'], s0['dist'], s0['sparse']['idx'])[0]
+        fy = ext.extract(s1['verts'], s1['dist'], s1['sparse']['idx'])[0]
         _, acc = contrastive_loss(fx, fy, tau)
         accs.append(acc.item())
     ext.train()
@@ -79,21 +83,22 @@ def main():
     train_set = build_dataset(opt['datasets']['train'])
     val_set = build_dataset(opt['datasets']['val'])
 
-    # Prefetching loader: the per-shape geodesic matrices are large and the dataset's LRU
-    # cache is small, so loading dominates. Workers overlap those loads with GPU compute
-    # (mirrors train.py); persistent_workers keeps the OS page cache / per-worker LRU warm
-    # across epochs. Each item is a full shape pair (batch_size=1, ragged tensors).
-    train_loader = DataLoader(
-        train_set, batch_size=1, shuffle=True, collate_fn=_collate,
-        num_workers=args.num_workers, persistent_workers=args.num_workers > 0,
-        prefetch_factor=(4 if args.num_workers > 0 else None), pin_memory=(device.type == 'cuda'))
-
     ext_cfg = dict(opt['networks']['extractor'])
     if args.node_in is not None:
         ext_cfg['node_in'] = args.node_in
     ext = build_network(ext_cfg).to(device)
     optim = torch.optim.AdamW(ext.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=args.epochs, eta_min=args.lr * 0.1)
+
+    # Prefetching loader: the per-shape geodesic matrices are large and the dataset's LRU
+    # cache is small, so loading + the patch gather dominate. The collate patchifies both
+    # shapes IN THE WORKER (build_patches) and drops the full (N,N) dist, so the main thread
+    # only does the trivial GPU forward. persistent_workers keeps the OS page cache warm.
+    collate = partial(_patch_collate, patch_size=ext.patch_size)
+    train_loader = DataLoader(
+        train_set, batch_size=1, shuffle=True, collate_fn=collate,
+        num_workers=args.num_workers, persistent_workers=args.num_workers > 0,
+        prefetch_factor=(4 if args.num_workers > 0 else None), pin_memory=(device.type == 'cuda'))
 
     n_params = sum(q.numel() for q in ext.parameters())
     print(f'extractor {ext.__class__.__name__} ({n_params:,} params) on {device}; '
@@ -111,8 +116,8 @@ def main():
         for pair in pbar:
             if args.max_steps is not None and step >= args.max_steps:
                 break
-            fx = _features(ext, pair['first'])
-            fy = _features(ext, pair['second'])
+            fx = ext(pair['first'])[0]              # pair['first'] = worker-built patches
+            fy = ext(pair['second'])[0]
             loss, acc = contrastive_loss(fx, fy, args.tau)
 
             optim.zero_grad()
