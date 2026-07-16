@@ -1,0 +1,1 @@
+- extractor_faust.pth is a GCN feature extractor trained with up to K=4 and the constrastive cross entropy loss
