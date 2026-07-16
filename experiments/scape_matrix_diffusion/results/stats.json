@@ -11,5 +11,7 @@
     "num_evecs": 200
   },
   "num_test_pairs": 380,
-  "dense_error": 0.0424332320690155
+  "dense_error": 0.04243782162666321,
+  "sparse_avg_error": 0.011108506470918655,
+  "sparse_acc": 0.8791426809210526
 }
