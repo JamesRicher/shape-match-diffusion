@@ -1,14 +1,9 @@
 """Learnable per-point GCN feature extractor (BendingGraphs Graphite, patch variant).
 
-Replaces the frozen .npy features with a small graph net trained end-to-end with the
-matcher. It produces one descriptor per SPARSE (FPS) point, but computes each from a LOCAL
-PATCH of the FULL-resolution mesh around that point (BendingGraphs' patch mode), so the
-feature reflects fine local surface geometry rather than the coarse FPS-neighbourhood:
-
-    for each FPS point p:
-        patch = the `patch_size` full-mesh vertices nearest p by geodesic distance
-        local graph = geodesic-kNN within the patch
-        run TAGConv layers on the patch, then max-pool -> one (out_dim) descriptor for p
+for each FPS point p:
+    patch = the `patch_size` full-mesh vertices nearest p by geodesic distance
+    local graph = geodesic-kNN within the patch
+    run TAGConv layers on the patch, then max-pool -> one (out_dim) descriptor for p
 
 Output is (1, n, out_dim) -- the shape the denoiser consumes for F, dropping into
 _sparse_inputs in place of the loaded feat.
@@ -25,15 +20,12 @@ from utils.registry import NETWORK_REGISTRY
 
 
 def build_patches(verts: torch.Tensor, dist: torch.Tensor, idx: torch.Tensor, patch_size: int):
-    """Gather local full-mesh patches for each FPS point. Param-free, so it can run in a
-    DataLoader worker (off the main thread) to overlap the topk/gather with GPU compute.
-
-    Returns (D_patch (n,p,p), patch_verts (n,p,3), center_verts (n,3)) -- small tensors, so
+    """Returns (D_patch (n,p,p), patch_verts (n,p,3), center_verts (n,3)) -- small tensors, so
     the caller can then drop the full (N,N) dist instead of shipping it to the main process.
     Column 0 of each patch is the FPS centre itself (nearest to itself, geodesic 0)."""
     idx = idx.long()
-    p = min(patch_size, dist.shape[0])
-    _, patch_idx = torch.topk(dist[idx], p, dim=-1, largest=False)              # (n, p)
+    p = min(patch_size, dist.shape[0]) # min of patch size and total mesh verts
+    _, patch_idx = torch.topk(dist[idx], p, dim=-1, largest=False)              # (n, p), closest verts to each centre
     D_patch = dist[patch_idx.unsqueeze(-1), patch_idx.unsqueeze(-2)].float()    # (n, p, p)
     patch_verts = verts[patch_idx].float()                                      # (n, p, 3)
     center_verts = verts[idx].float()                                           # (n, 3)
