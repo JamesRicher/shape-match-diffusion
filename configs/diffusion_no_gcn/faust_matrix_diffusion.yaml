@@ -1,20 +1,11 @@
-# Matrix diffusion matcher on FAUST_r (logit-space DDPM over the assignment).
-# Run with:  python train.py -c configs/faust_matrix_diffusion.yaml
-# Evaluate:  python evaluate.py -c configs/faust_matrix_diffusion.yaml --num_qual 0
-#   (--num_qual 0 required: validate_single returns a SPARSE p2p; dense qualitative
-#    texture-transfer needs densification, which is deferred — steps.md Step 3.)
-
-name: faust_matrix_diffusion_v2   # experiment dir under experiments/<name>/
+name: faust_matrix_diffusion_v2 
 model_type: MatrixDiffusionModel
 is_train: true
 # device: cuda                 # optional; auto-detected (cuda if available) when omitted
 
 datasets:
-  # Sparse FPS tokens with a bijective sparse GT permutation (n_sparse per shape).
   train: {name: Faust_r, type: SparsePairFaustDataset, phase: train, n_sparse: 256}
   val:   {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 256, exclude_self: true}
-  # test also loads eigenbases for the ZoomOut densifier (num_evecs >= densifier.k_final).
-  # evecs stay OFF for train/val so training is untouched (only evaluate.py reads test).
   test:  {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 256, exclude_self: true, ret_evecs: true, num_evecs: 200}
 
 networks:

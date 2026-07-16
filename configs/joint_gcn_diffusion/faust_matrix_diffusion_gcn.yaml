@@ -1,11 +1,14 @@
-# Matrix diffusion matcher on FAUST_r with a LEARNABLE GCN feature extractor.
-# Same as faust_matrix_diffusion.yaml but the frozen .npy features are replaced by a
-# BendingGraphs-style GCN (GCNFeatureExtractor) trained end-to-end with the denoiser.
-# Run with:  python train.py -c configs/faust_matrix_diffusion_gcn.yaml
-
 name: faust_matrix_diffusion_gcn
 model_type: MatrixDiffusionModel
 is_train: true
+
+# Warm-start the extractor from its pretrained weights (net-only load: fills `extractor`,
+# leaves `denoiser` random, starts at epoch 0). `resume: false` is required -- the pretrain
+# checkpoint has no optimizer/iter state, so a full resume would error. If the file does not
+# exist yet the load is silently skipped and the extractor starts RANDOM, so pretrain first.
+path:
+  resume_state: debug/feature_extractor/runs/faust_gcn_4layer/models/best.pth
+  resume: false
 
 datasets:
   train: {name: Faust_r, type: SparsePairFaustDataset, phase: train, n_sparse: 256}
@@ -53,10 +56,11 @@ train:
   total_epochs: 30
   log_freq: 20
   optims:
-    extractor: {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+    # gentle fine-tune of the warm-started extractor (10x lower LR than the from-scratch denoiser)
+    extractor: {type: AdamW, lr: 1e-4, weight_decay: 1e-4}
     denoiser:  {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
   schedulers:
-    extractor: {type: CosineAnnealingLR, eta_min: 1e-4}
+    extractor: {type: CosineAnnealingLR, eta_min: 1e-5}
     denoiser:  {type: CosineAnnealingLR, eta_min: 1e-4}
 
 val:
