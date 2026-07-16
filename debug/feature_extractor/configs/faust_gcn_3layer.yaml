@@ -1,0 +1,28 @@
+# DEBUG feature-extractor config: the ORIGINAL 3-layer extractor (no 4th hop).
+# Same as faust_gcn.yaml but reverts the added capacity -- 3 TAGConv layers (max hop 3) and
+# out_dim 64, matching the extractor before the extra layer was added. Own run name so its
+# outputs stay separate under debug/feature_extractor/runs/faust_gcn_3layer/.
+#   python pretrain_extractor.py -c debug/feature_extractor/configs/faust_gcn_3layer.yaml
+
+name: faust_gcn_3layer
+
+datasets:
+  train: {name: Faust_r, type: SparsePairFaustDataset, phase: train, n_sparse: 256}
+  val:   {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 256, exclude_self: true}
+
+network:
+  type: GCNFeatureExtractor
+  out_dim: 64
+  node_in: xyz
+  hidden: [16, 32]        # widths in->16->32->out_dim (3 TAGConv layers)
+  hops: [1, 2, 3]         # per-layer hop counts K (no 4th hop)
+  patch_size: 64
+  knn: 8
+
+train:
+  epochs: 50
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  tau: 0.07
+  num_workers: 8
+  eval_limit: 40

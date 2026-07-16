@@ -1,15 +1,18 @@
 """Evaluate a pretrained GCN feature extractor on FAUST: sparse feature-matching accuracy
 plus a Polyscope view colouring the sparse points by their features.
 
-    python evaluate_extractor.py                          # accuracy + visualise pair 0
+    python evaluate_extractor.py                          # default debug config + its best.pth
     python evaluate_extractor.py --no_vis                 # accuracy only (headless)
-    python evaluate_extractor.py --vis_index 5 --ckpt extractor_faust.pth
+    python evaluate_extractor.py --independent --no_vis   # honest (unpaired FPS) geodesic score
+    python evaluate_extractor.py -c <cfg> --ckpt <path>   # explicit config / checkpoint
 
-Matching is nearest-neighbour in the (L2-normalised) feature space. The sparse GT is the
-identity permutation over FPS points (point i of X <-> point i of Y), so a Y point j is
-correct iff argmax_i <f_y[j], f_x[i]> == j. We report exact accuracy and the mean sparse
-geodesic error (distance on X between the matched and the true vertex).
+Reads the same debug FE config as pretraining (debug/feature_extractor/configs/...); by
+default it loads that run's best checkpoint. Matching is nearest-neighbour in the
+(L2-normalised) feature space. In the bijective setting a Y point j is correct iff
+argmax_i <f_y[j], f_x[i]> == j (exact accuracy + mean sparse geodesic error); --independent
+switches to unpaired FPS scored by geodesic error via nearest-anchor densification.
 """
+import os
 import argparse
 
 import numpy as np
@@ -23,14 +26,20 @@ from networks import build_network
 from densifiers.nearest_anchor import NearestAnchorDensifier
 from densifiers.base_densifier import DensifyContext
 from metrics.geo_metric import calculate_geodesic_error
+from pretrain_extractor import DEFAULT_CONFIG, run_paths
 
 
-def load_extractor(config, ckpt, device, node_in=None):
+def load_extractor(config, ckpt, device, node_in=None, name=None):
     opt = load_yaml(config)
-    cfg = dict(opt['networks']['extractor'])
+    # debug FE config uses `network`; the diffusion config nests it under `networks.extractor`.
+    cfg = dict(opt.get('network') or opt['networks']['extractor'])
     if node_in is not None:
         cfg['node_in'] = node_in
     ext = build_network(cfg).to(device).eval()
+    # default checkpoint: this run's best.pth under debug/feature_extractor/runs/<name>/.
+    if ckpt is None:
+        ckpt = os.path.join(run_paths(name or opt['name'])[1], 'best.pth')
+    print(f'loading {ckpt}')
     state = torch.load(ckpt, map_location='cpu')
     sd = state['networks']['extractor'] if 'networks' in state else state
     ext.load_state_dict(sd)
@@ -126,8 +135,9 @@ def visualise(ext, dataset, index, gap=1.2):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('-c', '--config', default='configs/faust_matrix_diffusion_gcn.yaml')
-    p.add_argument('--ckpt', default='extractor_faust.pth')
+    p.add_argument('-c', '--config', default=DEFAULT_CONFIG, help='debug FE config (yaml)')
+    p.add_argument('--name', default=None, help="run name to locate the checkpoint (default: config name)")
+    p.add_argument('--ckpt', default=None, help="checkpoint (default: the run's best.pth)")
     p.add_argument('--node_in', default=None, help='override extractor node_in (must match training)')
     p.add_argument('--device', default=None)
     p.add_argument('--no_vis', action='store_true', help='accuracy only (no Polyscope window)')
@@ -139,7 +149,7 @@ def main():
     args = p.parse_args()
 
     device = torch.device(args.device or ('cuda' if torch.cuda.is_available() else 'cpu'))
-    ext, opt = load_extractor(args.config, args.ckpt, device, args.node_in)
+    ext, opt = load_extractor(args.config, args.ckpt, device, args.node_in, args.name)
 
     # honest test pairs (phase test, no self-pairs). The sparse FAUST dataset always returns
     # faces (used for the surface-mesh context in the viz).

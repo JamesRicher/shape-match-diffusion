@@ -1,0 +1,23 @@
+name: faust_gcn_triplet_3layer
+
+datasets:
+  train: {name: Faust_r, type: SparsePairFaustDataset, phase: train, n_sparse: 256}
+  val:   {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 256, exclude_self: true}
+
+network:
+  type: GCNFeatureExtractor
+  out_dim: 64
+  node_in: xyz
+  hidden: [16, 32]
+  hops: [1, 2, 3]
+  patch_size: 64
+  knn: 8
+
+train:
+  epochs: 50
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  loss: triplet           # BendingGraphs-style; omit / set 'contrastive' for InfoNCE
+  margin: 1.0             # triplet margin m
+  num_workers: 8
+  eval_limit: 40

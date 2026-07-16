@@ -4,3 +4,5 @@
 __pycache__
 notes
 .DS_Store
+# debug feature-extractor run outputs (checkpoints/logs); configs stay tracked
+debug/feature_extractor/runs/

@@ -1,0 +1,31 @@
+# DEBUG feature-extractor pretraining config (standalone, no diffusion).
+# Runs are self-contained under debug/feature_extractor/ -- kept deliberately separate from
+# the real configs/ and experiments/. Outputs go to debug/feature_extractor/runs/<name>/.
+#   python pretrain_extractor.py -c debug/feature_extractor/configs/faust_gcn.yaml
+#   python evaluate_extractor.py  -c debug/feature_extractor/configs/faust_gcn.yaml
+
+name: faust_gcn_4layer            # run dir = debug/feature_extractor/runs/<name>/
+# device: cuda            # optional; auto-detected when omitted
+
+datasets:
+  train: {name: Faust_r, type: SparsePairFaustDataset, phase: train, n_sparse: 256}
+  val:   {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 256, exclude_self: true}
+
+# the feature extractor to pretrain (same class the diffusion config registers as `extractor`)
+network:
+  type: GCNFeatureExtractor
+  out_dim: 128
+  node_in: xyz            # or 'anchor' for a fully-intrinsic (geodesic radial) extractor
+  hidden: [16, 32, 64]    # widths in->16->32->64->out_dim (4 TAGConv layers)
+  hops: [1, 2, 3, 4]      # per-layer hop counts K (len == len(hidden) + 1)
+  patch_size: 64          # full-mesh vertices per local patch
+  knn: 8                  # within-patch graph neighbours
+
+# contrastive pretraining (symmetric InfoNCE over the bijective sparse GT)
+train:
+  epochs: 50
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  tau: 0.07               # InfoNCE temperature
+  num_workers: 8          # DataLoader workers that prefetch + patchify off the main thread
+  eval_limit: 40          # val pairs scored each epoch (null = all)
