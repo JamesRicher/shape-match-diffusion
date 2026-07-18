@@ -1,0 +1,17 @@
+{
+  "name": "faust_matrix_diffusion_gcn_512",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/faust_matrix_diffusion_gcn_512/models/final.pth",
+  "dataset": {
+    "name": "Faust_r",
+    "type": "SparsePairFaustDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.03728698939085007,
+  "sparse_avg_error": 0.003970644436776638,
+  "sparse_acc": 0.9635331003289473
+}
