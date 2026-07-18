@@ -1,0 +1,1 @@
+- This experiment seemed to start overfitting/val plateau at 134k iters which works out to be 21 epochs
