@@ -11,7 +11,13 @@
     "num_evecs": 200
   },
   "num_test_pairs": 380,
-  "dense_error": 0.037892021238803864,
-  "sparse_avg_error": 0.02333010919392109,
-  "sparse_acc": 0.7193333675986842
+  "dense_error": 0.03807584568858147,
+  "auc": 0.6386522195640616,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.022870268672704697,
+  "sparse_acc": 0.7443153782894737,
+  "sparse_auc": 0.8879280183620747,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
 }
