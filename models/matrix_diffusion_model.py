@@ -8,8 +8,10 @@ reverse process in logit space, then Hungarian-snaps the final DS matrix to a sp
 point-to-point map. Densification to the full mesh is deferred (steps.md Step 3): dev
 evaluation is the sparse geodesic error over the FPS points.
 """
+import os
 from collections import OrderedDict
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from scipy.optimize import linear_sum_assignment
@@ -19,7 +21,7 @@ from utils.registry import MODEL_REGISTRY
 from utils.logger import get_root_logger
 from utils.sinkhorn import logit_target, q_sample, cosine_alpha_bar, log_sinkhorn
 from densifiers import build_densifier, DensifyContext
-from metrics.geo_metric import calculate_geodesic_error
+from metrics.geo_metric import calculate_geodesic_error, plot_pck
 from .base_model import BaseModel
 
 
@@ -50,6 +52,9 @@ class MatrixDiffusionModel(BaseModel):
         ev = opt.get('eval', {})
         self.report_sparse = ev.get('sparse', True)
         self.report_dense = ev.get('dense', self.densifier is not None)
+        # PCK-curve reporting range (match run_baselines.py so curves overlay directly).
+        self.pck_max = ev.get('pck_max', 0.25)  # geodesic-error upper bound (sqrt-area units)
+        self.pck_n = ev.get('pck_n', 100)       # number of thresholds in [0, pck_max]
 
         # optional Phase-3 diagnostics (steps.md Step 7), run at validation when enabled
         diag = opt.get('diagnostics', {})
@@ -227,6 +232,35 @@ class MatrixDiffusionModel(BaseModel):
                     for i in range(len(maps)) for j in range(i + 1, len(maps))]
         return float(np.mean(disagree)) if disagree else 0.0
 
+    def _pck_report(self, geo_errs, out_dir, tag=''):
+        """Build a PCK curve + AUC from a flat array of per-correspondence geodesic errors.
+
+        Writes ``pck<suffix>.png`` / ``pck<suffix>_data.npz`` to out_dir (same layout as
+        run_baselines.py, so the curves overlay directly and vis/plot_pck_combined.py reads
+        them). Returns a dict of scalar metrics to fold into the validation result.
+
+        Args:
+            geo_errs (np.ndarray): flat geodesic errors (sqrt-area normalised).
+            out_dir (str, optional): destination for the figure/npz; skipped when None.
+            tag (str): '' for the dense/reporting curve, e.g. 'sparse' for a diagnostic one.
+                Non-empty tags prefix the metric keys ('sparse_auc') and file names.
+        """
+        thresholds = np.linspace(0., self.pck_max, self.pck_n)
+        label = f'{self.opt["name"]} — {tag or "dense"}'
+        auc, fig, pck = plot_pck(geo_errs, threshold=self.pck_max, steps=self.pck_n, label=label)
+
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+            suffix = f'_{tag}' if tag else ''
+            fig.savefig(os.path.join(out_dir, f'pck{suffix}.png'), dpi=150, bbox_inches='tight')
+            np.savez(os.path.join(out_dir, f'pck{suffix}_data.npz'),
+                     thresholds=thresholds, pck=pck, errors=geo_errs)
+        plt.close(fig)
+
+        prefix = f'{tag}_' if tag else ''
+        return {f'{prefix}auc': float(auc), f'{prefix}pck_max': self.pck_max,
+                f'{prefix}pck_n': self.pck_n}
+
     # ------------------------------------------------------------------ #
     # validation (sparse dev metric and/or dense whole-shape MGE)
     # ------------------------------------------------------------------ #
@@ -274,9 +308,17 @@ class MatrixDiffusionModel(BaseModel):
             result['avg_error'] = float(errs.mean())
             result['acc'] = float(np.mean(accs))
             msg.append(f"sparse avg_error={result['avg_error']:.4f} acc={result['acc']:.3f}")
+            # diagnostic PCK over the sparse FPS points ('sparse_auc'); keys/files are
+            # prefixed so they never clash with the dense reporting curve below.
+            result.update(self._pck_report(errs, out_dir, tag='sparse'))
+            msg.append(f"sparse auc={result['sparse_auc']:.4f}")
         if self.report_dense:
-            result['dense_error'] = float(np.concatenate(dense_errs).mean())
+            dense_errs = np.concatenate(dense_errs)
+            result['dense_error'] = float(dense_errs.mean())
             msg.append(f"dense MGE={result['dense_error']:.4f}")
+            # the honest whole-shape reporting curve -> pck.png / pck_data.npz + 'auc'
+            result.update(self._pck_report(dense_errs, out_dir, tag=''))
+            msg.append(f"dense auc={result['auc']:.4f}")
         logger.info("Dev: " + " | ".join(msg))
 
         if first_data is not None and self.diag_loss_vs_t:
