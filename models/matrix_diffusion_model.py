@@ -52,8 +52,8 @@ class MatrixDiffusionModel(BaseModel):
         ev = opt.get('eval', {})
         self.report_sparse = ev.get('sparse', True)
         self.report_dense = ev.get('dense', self.densifier is not None)
-        # PCK-curve reporting range (match run_baselines.py so curves overlay directly).
-        self.pck_max = ev.get('pck_max', 0.25)  # geodesic-error upper bound (sqrt-area units)
+        # PCK-curve reporting range.
+        self.pck_max = ev.get('pck_max', 0.10)  # geodesic-error upper bound (sqrt-area units)
         self.pck_n = ev.get('pck_n', 100)       # number of thresholds in [0, pck_max]
 
         # optional Phase-3 diagnostics (steps.md Step 7), run at validation when enabled
