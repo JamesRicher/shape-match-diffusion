@@ -152,11 +152,13 @@ class SparsePairFaustDataset(SparsePairShapeDataset):
                  n_sparse=128,
                  ret_evecs=False,
                  num_evecs=200,
-                 exclude_self=False):
+                 exclude_self=False,
+                 fps_metric="geodesic"):
         dataset = SingleFaustDataset(data_root, phase, ret_faces=True, ret_feats=True,
                                      ret_corr=True, ret_dist=True, ret_evecs=ret_evecs,
                                      num_evecs=num_evecs)
-        super().__init__(dataset, n_sparse=n_sparse, phase=phase, exclude_self=exclude_self)
+        super().__init__(dataset, n_sparse=n_sparse, phase=phase, exclude_self=exclude_self,
+                         fps_metric=fps_metric)
 
 
 @DATASET_REGISTRY.register()
@@ -186,11 +188,13 @@ class SparsePairSmalDataset(SparsePairShapeDataset):
                  n_sparse=128,
                  ret_evecs=False,
                  num_evecs=200,
-                 exclude_self=False):
+                 exclude_self=False,
+                 fps_metric="geodesic"):
         dataset = SingleSmalDataset(data_root, phase, category, ret_faces=True,
                                     ret_feats=True, ret_corr=True, ret_dist=True,
                                     ret_evecs=ret_evecs, num_evecs=num_evecs)
-        super().__init__(dataset, n_sparse=n_sparse, phase=phase, exclude_self=exclude_self)
+        super().__init__(dataset, n_sparse=n_sparse, phase=phase, exclude_self=exclude_self,
+                         fps_metric=fps_metric)
 
 
 @DATASET_REGISTRY.register()
@@ -218,8 +222,10 @@ class SparsePairScapeDataset(SparsePairShapeDataset):
                  n_sparse=128,
                  ret_evecs=False,
                  num_evecs=200,
-                 exclude_self=False):
+                 exclude_self=False,
+                 fps_metric="geodesic"):
         dataset = SingleScapeDataset(data_root, phase, ret_faces=True, ret_feats=True,
                                      ret_corr=True, ret_dist=True, ret_evecs=ret_evecs,
                                      num_evecs=num_evecs)
-        super().__init__(dataset, n_sparse=n_sparse, phase=phase, exclude_self=exclude_self)
+        super().__init__(dataset, n_sparse=n_sparse, phase=phase, exclude_self=exclude_self,
+                         fps_metric=fps_metric)

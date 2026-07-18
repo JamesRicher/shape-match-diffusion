@@ -280,19 +280,26 @@ class SparsePairShapeDataset(PairShapeDataset):
     .vts, inside the metric) is a valid score. Left False for training and the fast dev
     metric; flipped on solely by evaluate.py so it can never leak into training.
     """
-    def __init__(self, dataset, n_sparse: int = 128, phase: str = "train", exclude_self: bool = False):
+    def __init__(self, dataset, n_sparse: int = 128, phase: str = "train", exclude_self: bool = False,
+                 fps_metric: str = "geodesic"):
         super().__init__(dataset, exclude_self=exclude_self)
         assert dataset.ret_corr and dataset.ret_dist and dataset.ret_feats, \
             "SparsePairShapeDataset needs corr, dist and feats"
+        assert fps_metric in ("geodesic", "euclidean"), \
+            f"fps_metric must be 'geodesic' or 'euclidean', got {fps_metric!r}"
         self.n_sparse = n_sparse
         self.train = (phase == "train")
         self.independent_fps = False
+        self.fps_metric = fps_metric        # 'geodesic' (intrinsic, pose-robust) or 'euclidean'
 
     def _independent_item(self, item, x, y):
         """FPS each shape on its own geometry (fixed start, deterministic). No gt_perm: the
         two independently sampled sets have no bijective correspondence. See independent_fps."""
-        idx_x = torch.from_numpy(fps(x['verts'].numpy(), self.n_sparse, 0)).long()
-        idx_y = torch.from_numpy(fps(y['verts'].numpy(), self.n_sparse, 0)).long()
+        geo = (self.fps_metric == "geodesic")
+        idx_x = torch.from_numpy(fps(x['verts'].numpy(), self.n_sparse, 0,
+                                     dist=x['dist'].numpy() if geo else None)).long()
+        idx_y = torch.from_numpy(fps(y['verts'].numpy(), self.n_sparse, 0,
+                                     dist=y['dist'].numpy() if geo else None)).long()
         for shape, idx in ((x, idx_x), (y, idx_y)):
             shape['sparse'] = {
                 'idx': idx,
@@ -319,7 +326,9 @@ class SparsePairShapeDataset(PairShapeDataset):
         # many-to-one per shape, so corr_y[K] can collide). K indexes both shapes' corr,
         # so sparse_x[i] <-> sparse_y[i] is an exact permutation.
         start = int(np.random.randint(T)) if self.train else index % T
-        K = consistent_bijective_fps(x['verts'].numpy(), corr_x, corr_y, self.n_sparse, start)
+        dist_x = x['dist'].numpy() if self.fps_metric == "geodesic" else None
+        K = consistent_bijective_fps(x['verts'].numpy(), corr_x, corr_y, self.n_sparse, start,
+                                     dist_x=dist_x)
 
         idx_x = torch.from_numpy(corr_x[K]).long()  # (n,) vertex indices on X, FPS order
         idx_y = torch.from_numpy(corr_y[K]).long()  # (n,) matched vertex indices on Y

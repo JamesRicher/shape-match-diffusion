@@ -70,10 +70,15 @@ def generate_qualitative(model, test_set, out_dir, num_pairs=10, seed=0):
     indices = rng.choice(len(test_set), size=min(num_pairs, len(test_set)), replace=False)
     flip_up = bool(getattr(test_set, 'flip_up', False))
 
+    # texture transfer needs a dense whole-shape p2p; a sparse matcher's validate_single only
+    # returns the sparse FPS-point map, so lift it through the densifier first.
+    use_dense = getattr(model, 'densifier', None) is not None
+
     for idx in indices:
         data = test_set[int(idx)]
         data_x, data_y = data['first'], data['second']
-        p2p = to_numpy(model.validate_single(data))  # Y -> X, [Vy]
+        p2p = to_numpy(model.densify_single(data) if use_dense
+                       else model.validate_single(data))  # Y -> X, [Vy]
 
         # per-pair mean geodesic error for the title (same normalization as validation)
         title_err = ''

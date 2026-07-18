@@ -123,13 +123,20 @@ def sparse_np_to_torch(A: scipy.sparse.spmatrix) -> "torch.Tensor":
         ).coalesce()
 
 
-def fps(pool, n: int, start: int):
+def fps(pool, n: int, start: int, dist=None):
+    """Greedy farthest-point sampling of n points from pool, starting at index `start`.
+
+    dist is None (default): extrinsic FPS on squared Euclidean distance in pool's coords.
+    dist given: intrinsic FPS on the geodesic matrix `dist` (N, N), aligned row/col to pool,
+    so points are spread evenly along the surface irrespective of pose. Squared-vs-raw is
+    immaterial -- FPS depends only on the ordering of distances, which both preserve.
+    """
     N = pool.shape[0]
     indices = np.empty(n, dtype=np.int64)
     indices[0] = start
     distances = np.full(N, np.inf)
     for i in range(1, n):
-        d = np.sum((pool - pool[indices[i-1]])**2, axis=1)
+        d = dist[indices[i-1]] if dist is not None else np.sum((pool - pool[indices[i-1]])**2, axis=1)
         distances = np.minimum(d, distances)
         indices[i] = np.argmax(distances)
     return indices
@@ -151,7 +158,7 @@ def _greedy_bijective(order: np.ndarray, corr_x: np.ndarray, corr_y: np.ndarray,
 
 
 def consistent_bijective_fps(verts_x: np.ndarray, corr_x: np.ndarray, corr_y: np.ndarray,
-                             n: int, start: int) -> np.ndarray:
+                             n: int, start: int, dist_x: np.ndarray = None) -> np.ndarray:
     """Pick n template positions giving a bijective sparse correspondence on both shapes.
 
     The .vts map template point -> vertex is many-to-one per shape (FAUST: 5000 template
@@ -165,14 +172,17 @@ def consistent_bijective_fps(verts_x: np.ndarray, corr_x: np.ndarray, corr_y: np
         corr_x, corr_y: (T,) template -> vertex maps for the two shapes.
         n: number of sparse points.
         start: FPS start position (index into the T covered points).
+        dist_x: (Vx, Vx) geodesic matrix on X. When given, FPS is geodesic over the covered
+            points (dist_x[corr_x][:, corr_x]); None -> Euclidean on verts_x[corr_x].
 
     Returns K (n,) template positions, in FPS order.
     """
     T = corr_x.shape[0]
     pool = verts_x[corr_x]
+    pool_dist = dist_x[corr_x][:, corr_x] if dist_x is not None else None
     depth = min(T, max(4 * n, 64))
     while True:
-        sel = _greedy_bijective(fps(pool, depth, start), corr_x, corr_y, n)
+        sel = _greedy_bijective(fps(pool, depth, start, dist=pool_dist), corr_x, corr_y, n)
         if len(sel) == n:
             return sel
         if depth == T:
