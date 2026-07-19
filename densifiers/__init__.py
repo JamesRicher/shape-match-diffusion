@@ -4,6 +4,7 @@ from utils.registry import DENSIFIER_REGISTRY
 from .base_densifier import BaseDensifier, DensifyContext
 
 # make the registry decorators run (add concrete densifier modules here as they land)
+import densifiers.functional_map
 import densifiers.nearest_anchor
 import densifiers.row_stochastic
 import densifiers.zoomout
