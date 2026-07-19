@@ -1,0 +1,1 @@
+This version used the same config as prev BUT instead used the new functional map densifier
