@@ -19,6 +19,7 @@ feat_weight=0. Non-learned, out of the loss (steps.md Step 3).
 import torch
 
 from utils.registry import DENSIFIER_REGISTRY
+from utils.spectral_features import wks
 from .base_densifier import BaseDensifier, DensifyContext
 
 
@@ -38,7 +39,23 @@ class RowStochasticDensifier(BaseDensifier):
         self.feat_weight = o.get('feat_weight', 1.0)  # 0 disables the data term (prior only)
         self.chunk = o.get('chunk', 512)          # Y-vertex rows scored per block (memory bound)
         self.top_c = o.get('top_c', 8)            # candidates kept per row in soft_map
+        self.wks_n = o.get('wks_n', 100)          # WKS descriptor dim, when feat_source == 'wks'
         self.eps = o.get('eps', 1e-12)
+
+    def _resolve_feats(self, ctx, dev):
+        """Dense per-vertex features (fx (N_x,d), fy (N_y,d)) for the data term, per feat_source.
+        'frozen'/'gcn' read ctx.feat_x/feat_y (the model fills 'gcn' densely beforehand); 'wks'
+        computes the Wave Kernel Signature here from the LBO spectrum. Returns (None, None) when
+        the needed fields are absent, disabling the data term (prior only)."""
+        if self.feat_source == 'wks':
+            if ctx.evecs_x is None or ctx.evals_x is None or ctx.evecs_y is None or ctx.evals_y is None:
+                raise ValueError("feat_source='wks' needs ctx.evecs/evals -- enable ret_evecs in the dataset")
+            fx = wks(ctx.evals_x.to(dev).float(), ctx.evecs_x.to(dev).float(), self.wks_n)
+            fy = wks(ctx.evals_y.to(dev).float(), ctx.evecs_y.to(dev).float(), self.wks_n)
+            return fx, fy
+        if ctx.feat_x is None or ctx.feat_y is None:
+            return None, None
+        return ctx.feat_x.to(dev).float(), ctx.feat_y.to(dev).float()
 
     def _prepare(self, sparse_p2p, ctx):
         assert ctx.dist_x is not None and ctx.dist_y is not None, \
@@ -64,9 +81,8 @@ class RowStochasticDensifier(BaseDensifier):
 
         pre = dict(dev=dev, a_idx=a_idx, w=w, m=m, Gker=Gker, fx=None, fy=None, inv_f=0.0)
 
-        use_feat = self.feat_weight > 0 and ctx.feat_x is not None and ctx.feat_y is not None
-        if use_feat:
-            fx, fy = ctx.feat_x.to(dev).float(), ctx.feat_y.to(dev).float()
+        fx, fy = self._resolve_feats(ctx, dev)
+        if self.feat_weight > 0 and fx is not None and fy is not None:
             if self.sigma_f is not None:
                 sigma_f = torch.as_tensor(float(self.sigma_f), device=dev)
             else:  # median feature distance from a Y vertex to its nearest anchor's X match

@@ -1,6 +1,6 @@
 {
   "name": "faust_matrix_diffusion_gcn_512",
-  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/faust_matrix_diffusion_gcn_512/models/final.pth",
+  "checkpoint": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/faust_matrix_diffusion_gcn_512/models/final.pth",
   "dataset": {
     "name": "Faust_r",
     "type": "SparsePairFaustDataset",
@@ -11,13 +11,13 @@
     "num_evecs": 200
   },
   "num_test_pairs": 380,
-  "dense_error": 0.028820345178246498,
-  "auc": 0.764590760233918,
+  "dense_error": 0.03956640884280205,
+  "auc": 0.7274227777777778,
   "pck_max": 0.1,
   "pck_n": 100,
-  "sparse_avg_error": 0.004715314134955406,
-  "sparse_acc": 0.9624691611842106,
-  "sparse_auc": 0.977998841208134,
+  "sparse_avg_error": 0.004882422741502523,
+  "sparse_acc": 0.9620939555921053,
+  "sparse_auc": 0.9776465570590775,
   "sparse_pck_max": 0.1,
   "sparse_pck_n": 100
 }

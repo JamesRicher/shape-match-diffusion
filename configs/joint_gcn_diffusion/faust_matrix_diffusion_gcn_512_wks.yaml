@@ -1,0 +1,66 @@
+name: faust_matrix_diffusion_gcn_512
+model_type: MatrixDiffusionModel
+is_train: true
+
+# Warm-start the extractor from its pretrained weights (net-only load: fills `extractor`,
+# leaves `denoiser` random, starts at epoch 0). `resume: false` is required -- the pretrain
+# checkpoint has no optimizer/iter state, so a full resume would error. If the file does not
+# exist yet the load is silently skipped and the extractor starts RANDOM, so pretrain first.
+path:
+  resume_state: extractor_faust.pth
+  resume: false
+
+datasets:
+  train: {name: Faust_r, type: SparsePairFaustDataset, phase: train, n_sparse: 512}
+  val:   {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 512, exclude_self: true}
+  test:  {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 512, exclude_self: true, ret_evecs: true, num_evecs: 200}
+
+networks:
+  # Learnable per-FPS-point features from local full-mesh patches (patch = nearest
+  # `patch_size` mesh vertices by geodesic distance, convolved then max-pooled).
+  extractor:
+    type: GCNFeatureExtractor
+    out_dim: 128
+    node_in: xyz          # or 'anchor' for a fully-intrinsic (geodesic radial) extractor
+    hidden: [16, 32, 64]  # widths in->16->32->64->out_dim (4 TAGConv layers)
+    hops: [1, 2, 3, 4]    # per-layer hop counts K (len == len(hidden) + 1)
+    patch_size: 64        # full-mesh vertices per patch (local receptive field)
+    knn: 8                # within-patch graph neighbours
+  denoiser:
+    type: MatrixDenoiser
+    feat_dim: 128         # = extractor.out_dim (explicit -> autofill leaves it alone)
+    dim: 128
+    heads: 4
+    depth: 6
+    n_anchors: 16
+    dropout: 0.0
+
+diffusion:
+  eta: 0.1
+  proj_iters: 6
+  schedule_s: 0.008
+  sample_steps: 50
+  final_iters: 20
+
+densifier:
+  type: RowStochasticDensifier
+  feat_source: wks
+  wks_n: 100
+
+eval:
+  sparse: true
+  dense: false
+
+train:
+  total_epochs: 30
+  log_freq: 20
+  optims:
+    # gentle fine-tune of the warm-started extractor (10x lower LR than the from-scratch denoiser)
+    extractor: {type: AdamW, lr: 1e-4, weight_decay: 1e-4}
+    denoiser:  {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+  schedulers:
+    extractor: {type: CosineAnnealingLR, eta_min: 1e-5}
+    denoiser:  {type: CosineAnnealingLR, eta_min: 1e-4}
+
+val:
+  subset: 40
