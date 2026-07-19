@@ -44,7 +44,9 @@ class MatrixDiffusionModel(BaseModel):
         self.ablate_features = cfg.get('ablate_features', False)
 
         # optional map densifier (sparse p2p -> dense whole-shape p2p). A non-learned
-        # post-process kept out of the loss (steps.md Step 3); None => sparse-only.
+        # post-process kept out of the loss (steps.md Step 3); None => sparse-only. The
+        # densifier may declare densifier.gcn_feats to ask _densify_context for dense GCN
+        # features in its data term (fulfilled here since the model owns the extractor).
         self.densifier = build_densifier(opt.get('densifier'))
 
         # which eval stats validation reports. Sparse (FPS-point geodesic error) is the fast
@@ -170,17 +172,35 @@ class MatrixDiffusionModel(BaseModel):
         p2p[torch.as_tensor(row_ind)] = torch.as_tensor(col_ind)
         return p2p
 
-    @staticmethod
-    def _densify_context(data):
+    @torch.no_grad()
+    def _dense_gcn_feats(self, verts, dist, chunk=1024):
+        """Run the GCN extractor at EVERY full-mesh vertex (a patch per vertex) to get a dense
+        (N, d) feature field for the densifier's data term. Chunked over centres so the
+        per-patch tensors stay small; the full (N, N) dist stays on its own device and only the
+        small per-patch tensors move to the GPU. Returns (N, d) on CPU."""
+        ext = self.networks['extractor']
+        N = dist.shape[0]
+        feats = [ext.extract(verts, dist, torch.arange(lo, min(lo + chunk, N))).squeeze(0).cpu()
+                 for lo in range(0, N, chunk)]
+        return torch.cat(feats, dim=0)                             # (N, d)
+
+    def _densify_context(self, data):
         """Build a DensifyContext from a dataset item's full-mesh fields (un-batched, dim-2
         tensors under the batch_size=1 single collate). Optional fields (feats, spectral ops)
-        are left None when absent, so each densifier reads only what it needs."""
+        are left None when absent, so each densifier reads only what it needs. When the
+        densifier declares gcn_feats and a GCN extractor is present, the frozen .npy feat field
+        is replaced by densely extracted GCN descriptors (one patch per full-mesh vertex)."""
         x, y = data['first'], data['second']
+        feat_x, feat_y = x.get('feat'), y.get('feat')
+        want_gcn = self.densifier is not None and getattr(self.densifier, 'gcn_feats', False)
+        if want_gcn and 'extractor' in self.networks:
+            feat_x = self._dense_gcn_feats(x['verts'], x['dist'])
+            feat_y = self._dense_gcn_feats(y['verts'], y['dist'])
         return DensifyContext(
             idx_x=x['sparse']['idx'], idx_y=y['sparse']['idx'],
             n_x=x['dist'].shape[0], n_y=y['dist'].shape[0],
             dist_x=x['dist'], dist_y=y['dist'],
-            feat_x=x.get('feat'), feat_y=y.get('feat'),
+            feat_x=feat_x, feat_y=feat_y,
             evecs_x=x.get('evecs'), evecs_y=y.get('evecs'),
             evals_x=x.get('evals'), evals_y=y.get('evals'),
             mass_x=x.get('mass'), mass_y=y.get('mass'),

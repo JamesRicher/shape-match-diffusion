@@ -48,6 +48,11 @@ class BaseDensifier(ABC):
 
     def __init__(self, opt: Optional[dict] = None):
         self.opt = opt or {}
+        # Feature source for any data term: True asks the caller to fill ctx.feat_x/feat_y with
+        # DENSE GCN descriptors (one patch per full-mesh vertex) instead of the frozen .npy
+        # field. Declared here but fulfilled by the model, which owns the extractor network; a
+        # densifier with no data term simply ignores it.
+        self.gcn_feats = self.opt.get('gcn_feats', False)
 
     @abstractmethod
     def densify(self, sparse_p2p: torch.Tensor, ctx: DensifyContext) -> torch.Tensor:
