@@ -1,0 +1,23 @@
+{
+  "name": "faust_matrix_diffusion_gcn_512_redo",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/faust_matrix_diffusion_gcn_512_redo/models/final.pth",
+  "dataset": {
+    "name": "Faust_r",
+    "type": "SparsePairFaustDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.09046071767807007,
+  "auc": 0.7289098484848484,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.0029045080300420523,
+  "sparse_acc": 0.9719058388157895,
+  "sparse_auc": 0.9840348904339447,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}

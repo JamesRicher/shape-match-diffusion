@@ -1,0 +1,16 @@
+{
+  "name": "faust_gcn_4layer_48patch",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/debug/feature_extractor/runs/faust_gcn_4layer_48patch/models/best.pth",
+  "config": "debug/feature_extractor/configs/faust_gcn_4layer_48patch.yaml",
+  "dataset": {
+    "name": "Faust_r",
+    "type": "SparsePairFaustDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true
+  },
+  "mode": "bijective",
+  "num_eval_pairs": 380,
+  "accuracy": 0.4736225328947368,
+  "mean_sparse_geo_error": 0.1950961332278032
+}
