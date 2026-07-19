@@ -1,0 +1,70 @@
+# 2x2 ablation, Run B: patch-48 extractor + EUCLIDEAN training FPS.
+# Holds the redo extractor (faust_gcn_4layer_48patch, patch_size 48) constant and flips the
+# training FPS metric to euclidean. Compare dense_error against the bad redo run
+# (patch 48 + geodesic train = 0.09):
+#   ~0.016 -> euclidean training rescues the small patch (FPS is the cause)
+#   ~0.09  -> small patch is bad regardless of FPS (extractor is the cause)
+name: runB_patch48_euc
+model_type: MatrixDiffusionModel
+is_train: true
+
+path:
+  resume_state: debug/feature_extractor/runs/faust_gcn_4layer_48patch/models/final.pth
+  resume: false
+
+datasets:
+  # train/val FPS forced to euclidean; test left at default (eval FPS shown to be a non-factor)
+  train: {name: Faust_r, type: SparsePairFaustDataset, phase: train, n_sparse: 512, fps_metric: euclidean}
+  val:   {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 512, exclude_self: true, fps_metric: euclidean}
+  test:  {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 512, exclude_self: true, ret_evecs: true, num_evecs: 200}
+
+networks:
+  extractor:
+    type: GCNFeatureExtractor
+    out_dim: 128
+    node_in: xyz
+    hidden: [16, 32, 64]
+    hops: [1, 2, 3, 4]
+    patch_size: 48
+    knn: 6
+  denoiser:
+    type: MatrixDenoiser
+    feat_dim: 128
+    dim: 128
+    heads: 4
+    depth: 6
+    n_anchors: 16
+    dropout: 0.0
+
+diffusion:
+  eta: 0.1
+  proj_iters: 6
+  schedule_s: 0.008
+  sample_steps: 50
+  final_iters: 20
+
+densifier:
+  type: FunctionalMapDensifier
+  k_fm: 120
+  n_e: 100
+  lm_bands: 20
+  lm_weight: 5.0
+  mu: 0.1
+  variance: 7.0
+
+eval:
+  sparse: true
+  dense: false
+
+train:
+  total_epochs: 30
+  log_freq: 20
+  optims:
+    extractor: {type: AdamW, lr: 1e-4, weight_decay: 1e-4}
+    denoiser:  {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+  schedulers:
+    extractor: {type: CosineAnnealingLR, eta_min: 1e-5}
+    denoiser:  {type: CosineAnnealingLR, eta_min: 1e-4}
+
+val:
+  subset: 40
