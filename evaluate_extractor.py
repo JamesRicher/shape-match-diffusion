@@ -13,6 +13,7 @@ argmax_i <f_y[j], f_x[i]> == j (exact accuracy + mean sparse geodesic error); --
 switches to unpaired FPS scored by geodesic error via nearest-anchor densification.
 """
 import os
+import json
 import argparse
 
 import numpy as np
@@ -43,7 +44,7 @@ def load_extractor(config, ckpt, device, node_in=None, name=None):
     state = torch.load(ckpt, map_location='cpu')
     sd = state['networks']['extractor'] if 'networks' in state else state
     ext.load_state_dict(sd)
-    return ext, opt
+    return ext, opt, ckpt
 
 
 @torch.no_grad()
@@ -149,7 +150,7 @@ def main():
     args = p.parse_args()
 
     device = torch.device(args.device or ('cuda' if torch.cuda.is_available() else 'cpu'))
-    ext, opt = load_extractor(args.config, args.ckpt, device, args.node_in, args.name)
+    ext, opt, ckpt = load_extractor(args.config, args.ckpt, device, args.node_in, args.name)
 
     # honest test pairs (phase test, no self-pairs). The sparse FAUST dataset always returns
     # faces (used for the surface-mesh context in the viz).
@@ -161,10 +162,29 @@ def main():
         acc, err = evaluate_independent(ext, dataset, args.thresh, args.limit)
         print(f'FAUST independent-FPS matching over {n_eval} pairs: '
               f'PCK@{args.thresh} {acc:.4f} | mean geo error {err:.4f}')
+        mode, metrics = 'independent', {f'pck@{args.thresh}': acc, 'mean_geo_error': err}
     else:                                              # bijective FPS: exact-match accuracy
         acc, err = evaluate(ext, dataset, args.limit)
         print(f'FAUST sparse feature matching over {n_eval} pairs: '
               f'accuracy {acc:.4f} | mean sparse geo error {err:.4f}')
+        mode, metrics = 'bijective', {'accuracy': acc, 'mean_sparse_geo_error': err}
+
+    # persist to the run's results/ dir (same convention as evaluate.py's stats.json). The
+    # two eval modes report different metrics, so key the filename by mode to avoid clobbering.
+    results_dir = run_paths(args.name or opt['name'])[2]
+    stats = {
+        'name': opt['name'],
+        'checkpoint': ckpt,
+        'config': args.config,
+        'dataset': opt['datasets']['val'],
+        'mode': mode,
+        'num_eval_pairs': n_eval,
+        **metrics,
+    }
+    out_file = os.path.join(results_dir, f'eval_{mode}.json')
+    with open(out_file, 'w') as f:
+        json.dump(stats, f, indent=2)
+    print(f'wrote results to {out_file}')
 
     if not args.no_vis:
         visualise(ext, dataset, args.vis_index)
