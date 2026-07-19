@@ -43,7 +43,7 @@ diffusion:
   final_iters: 20
 
 densifier:
-  type: ZoomOutDensifier
+  type: RowStochasticDensifier
   k_start: 20
   k_step: 10
   k_final: 200

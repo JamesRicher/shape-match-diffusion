@@ -11,13 +11,13 @@
     "num_evecs": 200
   },
   "num_test_pairs": 380,
-  "dense_error": 0.03737717121839523,
-  "auc": 0.8525952365762892,
-  "pck_max": 0.25,
+  "dense_error": 0.028820345178246498,
+  "auc": 0.764590760233918,
+  "pck_max": 0.1,
   "pck_n": 100,
-  "sparse_avg_error": 0.004910176154226065,
-  "sparse_acc": 0.9618678042763158,
-  "sparse_auc": 0.987615204263025,
-  "sparse_pck_max": 0.25,
+  "sparse_avg_error": 0.004715314134955406,
+  "sparse_acc": 0.9624691611842106,
+  "sparse_auc": 0.977998841208134,
+  "sparse_pck_max": 0.1,
   "sparse_pck_n": 100
 }
