@@ -60,9 +60,8 @@ eval:
   dense: false
 
 train:
-  # iteration-matched to FAUST (~192k iters): SMAL_r cat train = 29 shapes (~840 pairs/epoch)
-  # vs FAUST's 80 shapes (~6400/epoch), so ~230 epochs here matches FAUST's 30.
-  total_epochs: 230
+  # ~80% of FAUST's joint budget (~150k steps); SMAL_r cat train = 29 shapes (~840 pairs/epoch)
+  total_epochs: 180
   log_freq: 20
   optims:
     extractor: {type: AdamW, lr: 1e-4, weight_decay: 1e-4}

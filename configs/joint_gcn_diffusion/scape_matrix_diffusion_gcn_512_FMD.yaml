@@ -62,7 +62,7 @@ eval:
   dense: false
 
 train:
-  # iteration-matched to FAUST via the repo's existing SCAPE convention (scape_matrix_diffusion.yaml)
+  # ~80% of FAUST's joint budget (~156k steps); 2601 pairs/epoch
   total_epochs: 60
   log_freq: 20
   optims:

@@ -25,7 +25,8 @@ network:
 
 # contrastive pretraining (symmetric InfoNCE over the bijective sparse GT)
 train:
-  epochs: 50
+  epochs: 200             # ~80% of FAUST pretrain budget (~250k steps); 841 pairs/epoch.
+                          # 29 shapes seen many times -- watch val acc (eval_limit) for overfit; early-stop if it drops.
   lr: 1.0e-3
   weight_decay: 1.0e-4
   tau: 0.07               # InfoNCE temperature
