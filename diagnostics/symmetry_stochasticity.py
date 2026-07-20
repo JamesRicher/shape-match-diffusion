@@ -85,18 +85,19 @@ def _build(config_path, checkpoint, device, split):
     return model, dataset, opt, ckpt
 
 
-def _pair_indices(dataset, num_pairs, explicit):
+def _pair_indices(dataset, num_pairs, explicit, seed):
     if explicit:
         return [i for i in explicit if 0 <= i < len(dataset)]
+    # seeded random subset -- identical across configs (same seed + same dataset length)
     n = min(num_pairs, len(dataset))
-    return list(np.linspace(0, len(dataset) - 1, n).round().astype(int))
+    return sorted(np.random.default_rng(seed).choice(len(dataset), size=n, replace=False).tolist())
 
 
-def run_one(config_path, checkpoint, device, split, indices_arg, num_pairs,
+def run_one(config_path, checkpoint, device, split, indices_arg, num_pairs, seed,
             n_samples, t_bins, t_repeats):
     model, dataset, opt, ckpt = _build(config_path, checkpoint, device, split)
     name = opt['name']
-    idxs = _pair_indices(dataset, num_pairs, indices_arg)
+    idxs = _pair_indices(dataset, num_pairs, indices_arg, seed)
 
     per_pair = []
     for i in tqdm(idxs, desc=f'{name} stochasticity'):
@@ -144,9 +145,11 @@ def main():
     p.add_argument('-c', '--config', nargs='+', required=True, help='one or more training configs')
     p.add_argument('--checkpoint', default=None, help='checkpoint override (only with a single -c)')
     p.add_argument('--split', default='test', choices=['train', 'val', 'test'])
-    p.add_argument('--num-pairs', type=int, default=8, help='pairs to probe (evenly spaced)')
+    p.add_argument('--num-pairs', type=int, default=8, help='pairs to probe (seeded random subset)')
+    p.add_argument('--seed', type=int, default=0,
+                   help='seed for the random pair subset; SAME across all -c configs so they stay comparable')
     p.add_argument('--pair-indices', type=int, nargs='+', default=None,
-                   help='explicit dataset pair indices (overrides --num-pairs)')
+                   help='explicit dataset pair indices (overrides the subset)')
     p.add_argument('--n-samples', type=int, default=8, help='prior draws for trajectory divergence')
     p.add_argument('--t-bins', type=int, default=10, help='diffusion-time bins for loss-vs-t')
     p.add_argument('--t-repeats', type=int, default=16, help='noise draws per t bin')
@@ -158,7 +161,7 @@ def main():
     summaries = []
     for cfg in args.config:
         summaries.append(run_one(cfg, args.checkpoint, args.device, args.split,
-                                 args.pair_indices, args.num_pairs,
+                                 args.pair_indices, args.num_pairs, args.seed,
                                  args.n_samples, args.t_bins, args.t_repeats))
     _print_table(summaries)
     print(f"\nper-experiment JSON (incl. per-pair loss-vs-t curves) under: {_OUT_ROOT}/<name>_stochasticity/")

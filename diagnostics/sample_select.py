@@ -137,14 +137,17 @@ def _dirichlet(p2p, dist_y_s, dist_x_s, knn):
     return float((w * dX.gather(1, nn_idx) ** 2).sum())
 
 
-def run_one(cfg, checkpoint, device, split, indices_arg, num_pairs, K, temperature, eta,
+def run_one(cfg, checkpoint, device, split, indices_arg, num_pairs, seed, K, temperature, eta,
             criterion, knn, thresh):
     model, dataset, opt, ckpt = _build(cfg, checkpoint, device, split)
     name = opt['name']
     if indices_arg:
         idxs = [i for i in indices_arg if 0 <= i < len(dataset)]
     else:
-        idxs = list(np.linspace(0, len(dataset) - 1, min(num_pairs, len(dataset))).round().astype(int))
+        # seeded random subset -- identical across configs (same seed + same dataset length),
+        # so multi -c runs stay comparable while sampling the pair grid representatively.
+        n = min(num_pairs, len(dataset))
+        idxs = sorted(np.random.default_rng(seed).choice(len(dataset), size=n, replace=False).tolist())
 
     rows = []
     for i in tqdm(idxs, desc=f'{name} sample x{K}'):
@@ -210,8 +213,10 @@ def main():
     p.add_argument('--checkpoint', default=None, help='checkpoint override (only with a single -c)')
     p.add_argument('--split', default='test', choices=['train', 'val', 'test'])
     p.add_argument('--k', type=int, default=20, help='samples drawn per pair')
-    p.add_argument('--num-pairs', type=int, default=8, help='pairs to probe (evenly spaced)')
-    p.add_argument('--pair-indices', type=int, nargs='+', default=None, help='explicit pair indices')
+    p.add_argument('--num-pairs', type=int, default=8, help='pairs to probe (seeded random subset)')
+    p.add_argument('--seed', type=int, default=0,
+                   help='seed for the random pair subset; SAME across all -c configs so they stay comparable')
+    p.add_argument('--pair-indices', type=int, nargs='+', default=None, help='explicit pair indices (overrides subset)')
     p.add_argument('--temperature', type=float, default=1.0, help='initial-prior scale (>1 = more diverse)')
     p.add_argument('--eta', type=float, default=0.0,
                    help='per-step DDIM<->DDPM stochasticity (0 = deterministic DDIM, 1 = full DDPM)')
@@ -227,7 +232,7 @@ def main():
     summaries = []
     for cfg in args.config:
         summaries.append(run_one(cfg, args.checkpoint, args.device, args.split,
-                                 args.pair_indices, args.num_pairs, args.k, args.temperature,
+                                 args.pair_indices, args.num_pairs, args.seed, args.k, args.temperature,
                                  args.eta, args.criterion, args.knn, args.flip_thresh))
     _print_table(summaries, args.criterion, args.k)
     print(f"\nper-experiment JSON under: {_OUT_ROOT}/<name>_sampleselect/")

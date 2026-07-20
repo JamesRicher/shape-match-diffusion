@@ -117,14 +117,18 @@ def _flip_stats(err, thresh):
             'gross_gt_0.1': float(np.mean(err > 0.1))}
 
 
-def run_one(config_path, checkpoint, device, num_pairs, flip_thresh):
+def run_one(config_path, checkpoint, device, num_pairs, seed, flip_thresh):
     model, dataset, opt, ckpt = _build(config_path, checkpoint, device)
     name = opt['name']
     has_dens = getattr(model, 'densifier', None) is not None
-    n_pairs = len(dataset) if not num_pairs else min(num_pairs, len(dataset))
+    if not num_pairs:                                    # 0 -> all pairs, in order
+        idxs = list(range(len(dataset)))
+    else:                                                # seeded random subset (same across configs)
+        n = min(num_pairs, len(dataset))
+        idxs = sorted(np.random.default_rng(seed).choice(len(dataset), size=n, replace=False).tolist())
 
     e_fm, e_vor, e_gt = [], [], []
-    for i in tqdm(range(n_pairs), desc=f'{name} (independent FPS)'):
+    for i in tqdm(idxs, desc=f'{name} (independent FPS)'):
         data = dataset[i]
         x, y = data['first'], data['second']
         sp_t = model.validate_single(data)                       # (n,) sparse Y->X, ONE sample
@@ -152,7 +156,7 @@ def run_one(config_path, checkpoint, device, num_pairs, flip_thresh):
 
     out_dir = os.path.join(_OUT_ROOT, name)
     os.makedirs(out_dir, exist_ok=True)
-    arrays, summary = {}, {'name': name, 'checkpoint': ckpt, 'n_pairs': n_pairs,
+    arrays, summary = {}, {'name': name, 'checkpoint': ckpt, 'n_pairs': len(idxs),
                            'flip_thresh': flip_thresh}
     arrays['voronoi'] = np.concatenate(e_vor)
     summary['dense_voronoi'] = _flip_stats(arrays['voronoi'], flip_thresh)
@@ -189,7 +193,9 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('-c', '--config', nargs='+', required=True, help='one or more training configs')
     p.add_argument('--checkpoint', default=None, help='checkpoint override (only with a single -c)')
-    p.add_argument('--num-pairs', type=int, default=0, help='cap pairs for a quick look (0 = all)')
+    p.add_argument('--num-pairs', type=int, default=0, help='cap pairs for a quick look, seeded random subset (0 = all)')
+    p.add_argument('--seed', type=int, default=0,
+                   help='seed for the random pair subset; SAME across all -c configs so they stay comparable')
     p.add_argument('--flip-thresh', type=float, default=0.20, help='geodesic-error flip threshold')
     p.add_argument('--device', default=None, help="'cuda' / 'cpu'; auto-detected when omitted")
     args = p.parse_args()
@@ -198,7 +204,7 @@ def main():
 
     summaries = []
     for cfg in args.config:
-        summaries.append(run_one(cfg, args.checkpoint, args.device, args.num_pairs, args.flip_thresh))
+        summaries.append(run_one(cfg, args.checkpoint, args.device, args.num_pairs, args.seed, args.flip_thresh))
     _print_table(summaries, args.flip_thresh)
     print(f"\nper-experiment JSON + error arrays under: {_OUT_ROOT}/<name>/")
 
