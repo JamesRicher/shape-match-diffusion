@@ -1,0 +1,73 @@
+# EXPERIMENT DIFFS:
+# - different feature extractor, also fixed geodesic FPS since last run
+
+name: faust_matrix_diffusion_gcn_512_redo
+model_type: MatrixDiffusionModel
+is_train: true
+
+# Warm-start the extractor from its pretrained weights (net-only load: fills `extractor`,
+# leaves `denoiser` random, starts at epoch 0). `resume: false` is required -- the pretrain
+# checkpoint has no optimizer/iter state, so a full resume would error. If the file does not
+# exist yet the load is silently skipped and the extractor starts RANDOM, so pretrain first.
+path:
+  resume_state: debug/feature_extractor/runs/faust_gcn_4layer_48patch/models/final.pth
+  resume: false
+
+datasets:
+  train: {name: Faust_r, type: SparsePairFaustDataset, phase: train, n_sparse: 512}
+  val:   {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 512, exclude_self: true}
+  test:  {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 512, exclude_self: true, ret_evecs: true, num_evecs: 200,  fps_metric: euclidean}
+
+networks:
+  # Learnable per-FPS-point features from local full-mesh patches (patch = nearest
+  # `patch_size` mesh vertices by geodesic distance, convolved then max-pooled).
+  extractor:
+    type: GCNFeatureExtractor
+    out_dim: 128
+    node_in: xyz          # or 'anchor' for a fully-intrinsic (geodesic radial) extractor
+    hidden: [16, 32, 64]  # widths in->16->32->64->out_dim (4 TAGConv layers)
+    hops: [1, 2, 3, 4]    # per-layer hop counts K (len == len(hidden) + 1)
+    patch_size: 48        # full-mesh vertices per patch (local receptive field)
+    knn: 6                # within-patch graph neighbours
+  denoiser:
+    type: MatrixDenoiser
+    feat_dim: 128         # = extractor.out_dim (explicit -> autofill leaves it alone)
+    dim: 128
+    heads: 4
+    depth: 6
+    n_anchors: 16
+    dropout: 0.0
+
+diffusion:
+  eta: 0.1
+  proj_iters: 6
+  schedule_s: 0.008
+  sample_steps: 50
+  final_iters: 20
+
+densifier:
+  type: FunctionalMapDensifier
+  k_fm: 120        # spectral basis for C + readout
+  n_e: 100         # global WKS bands
+  lm_bands: 20     # wave-kernel bands per landmark
+  lm_weight: 5.0   # landmark vs global weight
+  mu: 0.1          # Laplacian-commutativity strength
+  variance: 7.0
+
+eval:
+  sparse: true
+  dense: false
+
+train:
+  total_epochs: 30
+  log_freq: 20
+  optims:
+    # gentle fine-tune of the warm-started extractor (10x lower LR than the from-scratch denoiser)
+    extractor: {type: AdamW, lr: 1e-4, weight_decay: 1e-4}
+    denoiser:  {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+  schedulers:
+    extractor: {type: CosineAnnealingLR, eta_min: 1e-5}
+    denoiser:  {type: CosineAnnealingLR, eta_min: 1e-4}
+
+val:
+  subset: 40

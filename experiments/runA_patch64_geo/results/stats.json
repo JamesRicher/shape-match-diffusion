@@ -1,0 +1,23 @@
+{
+  "name": "runA_patch64_geo",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/runA_patch64_geo/models/final.pth",
+  "dataset": {
+    "name": "Faust_r",
+    "type": "SparsePairFaustDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.13421088457107544,
+  "auc": 0.64963778841042,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.004364152438938618,
+  "sparse_acc": 0.9633994654605263,
+  "sparse_auc": 0.9785216214364034,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}
