@@ -1,0 +1,76 @@
+# Full GCN->diffusion->FM-densifier model on SCAPE_r. Mirrors the good FAUST config
+# (faust_matrix_diffusion_gcn_512_FMD.yaml) exactly; only the dataset, the pretrained-extractor
+# path, and the (iteration-matched) epoch count differ. Pretrain the extractor FIRST:
+#   python pretrain_extractor.py -c debug/feature_extractor/configs/scape_gcn_4layer.yaml
+# then:
+#   python train.py    -c configs/joint_gcn_diffusion/scape_matrix_diffusion_gcn_512_FMD.yaml
+#   python evaluate.py -c configs/joint_gcn_diffusion/scape_matrix_diffusion_gcn_512_FMD.yaml --num_qual 0
+name: scape_matrix_diffusion_gcn_512_FMD
+model_type: MatrixDiffusionModel
+is_train: true
+
+# Warm-start the extractor from its pretrained weights (net-only load; denoiser stays random,
+# starts at epoch 0). If best.pth does not exist yet the load is silently skipped and the
+# extractor starts RANDOM -- pretrain first.
+path:
+  resume_state: debug/feature_extractor/runs/scape_gcn_4layer/models/best.pth
+  resume: false
+
+datasets:
+  # fps_metric: euclidean pinned to match the good FAUST regime (default has since drifted to
+  # geodesic). SCAPE_r: 51 train shapes; n_sparse 512 is within template coverage (proven).
+  train: {name: Scape_r, type: SparsePairScapeDataset, phase: train, n_sparse: 512, fps_metric: euclidean}
+  val:   {name: Scape_r, type: SparsePairScapeDataset, phase: test,  n_sparse: 512, exclude_self: true, fps_metric: euclidean}
+  test:  {name: Scape_r, type: SparsePairScapeDataset, phase: test,  n_sparse: 512, exclude_self: true, ret_evecs: true, num_evecs: 200, fps_metric: euclidean}
+
+networks:
+  extractor:
+    type: GCNFeatureExtractor
+    out_dim: 128
+    node_in: xyz
+    hidden: [16, 32, 64]
+    hops: [1, 2, 3, 4]
+    patch_size: 64
+    knn: 8
+  denoiser:
+    type: MatrixDenoiser
+    feat_dim: 128
+    dim: 128
+    heads: 4
+    depth: 6
+    n_anchors: 16
+    dropout: 0.0
+
+diffusion:
+  eta: 0.1
+  proj_iters: 6
+  schedule_s: 0.008
+  sample_steps: 50
+  final_iters: 20
+
+densifier:
+  type: FunctionalMapDensifier
+  k_fm: 120
+  n_e: 100
+  lm_bands: 20
+  lm_weight: 5.0
+  mu: 0.1
+  variance: 7.0
+
+eval:
+  sparse: true
+  dense: false
+
+train:
+  # iteration-matched to FAUST via the repo's existing SCAPE convention (scape_matrix_diffusion.yaml)
+  total_epochs: 60
+  log_freq: 20
+  optims:
+    extractor: {type: AdamW, lr: 1e-4, weight_decay: 1e-4}
+    denoiser:  {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+  schedulers:
+    extractor: {type: CosineAnnealingLR, eta_min: 1e-5}
+    denoiser:  {type: CosineAnnealingLR, eta_min: 1e-4}
+
+val:
+  subset: 40

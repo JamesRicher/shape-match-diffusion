@@ -1,0 +1,33 @@
+# DEBUG feature-extractor pretraining -- SMAL_r. Replicates faust_gcn_4layer.yaml (the recipe
+# that produced the good FAUST extractor) EXACTLY; only the dataset differs.
+#   python pretrain_extractor.py -c debug/feature_extractor/configs/smal_gcn_4layer.yaml
+#   python evaluate_extractor.py  -c debug/feature_extractor/configs/smal_gcn_4layer.yaml
+#
+# fps_metric pinned to 'euclidean' to reproduce the good FAUST regime (see scape_gcn_4layer.yaml).
+# category: true = canonical SMAL_r species-held-out split (the ULRSSM protocol / published
+# baselines); set category: false for the in-distribution split instead.
+
+name: smal_gcn_4layer
+
+datasets:
+  train: {name: Smal_r, type: SparsePairSmalDataset, phase: train, n_sparse: 256, category: true, fps_metric: euclidean}
+  val:   {name: Smal_r, type: SparsePairSmalDataset, phase: test,  n_sparse: 256, exclude_self: true, category: true, fps_metric: euclidean}
+
+# the feature extractor to pretrain (same class the diffusion config registers as `extractor`)
+network:
+  type: GCNFeatureExtractor
+  out_dim: 128
+  node_in: xyz            # or 'anchor' for a fully-intrinsic (geodesic radial) extractor
+  hidden: [16, 32, 64]    # widths in->16->32->64->out_dim (4 TAGConv layers)
+  hops: [1, 2, 3, 4]      # per-layer hop counts K (len == len(hidden) + 1)
+  patch_size: 64          # full-mesh vertices per local patch
+  knn: 8                  # within-patch graph neighbours
+
+# contrastive pretraining (symmetric InfoNCE over the bijective sparse GT)
+train:
+  epochs: 50
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  tau: 0.07               # InfoNCE temperature
+  num_workers: 8          # DataLoader workers that prefetch + patchify off the main thread
+  eval_limit: 40          # val pairs scored each epoch (null = all)

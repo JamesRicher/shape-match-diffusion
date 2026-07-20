@@ -1,0 +1,75 @@
+# Full GCN->diffusion->FM-densifier model on SMAL_r. Mirrors the good FAUST config
+# (faust_matrix_diffusion_gcn_512_FMD.yaml) exactly; only the dataset, the pretrained-extractor
+# path, and the (iteration-matched) epoch count differ. Pretrain the extractor FIRST:
+#   python pretrain_extractor.py -c debug/feature_extractor/configs/smal_gcn_4layer.yaml
+# then:
+#   python train.py    -c configs/joint_gcn_diffusion/smal_matrix_diffusion_gcn_512_FMD.yaml
+#   python evaluate.py -c configs/joint_gcn_diffusion/smal_matrix_diffusion_gcn_512_FMD.yaml --num_qual 0
+name: smal_matrix_diffusion_gcn_512_FMD
+model_type: MatrixDiffusionModel
+is_train: true
+
+path:
+  resume_state: debug/feature_extractor/runs/smal_gcn_4layer/models/best.pth
+  resume: false
+
+datasets:
+  # category: true = canonical SMAL_r species-held-out split (ULRSSM protocol), MATCHING the
+  # extractor pretraining. fps_metric: euclidean pinned to match the good FAUST regime.
+  # n_sparse 512 is safe: SMAL_r .vts covers ~2250 distinct verts/shape.
+  train: {name: Smal_r, type: SparsePairSmalDataset, phase: train, n_sparse: 512, category: true, fps_metric: euclidean}
+  val:   {name: Smal_r, type: SparsePairSmalDataset, phase: test,  n_sparse: 512, exclude_self: true, category: true, fps_metric: euclidean}
+  test:  {name: Smal_r, type: SparsePairSmalDataset, phase: test,  n_sparse: 512, exclude_self: true, category: true, ret_evecs: true, num_evecs: 200, fps_metric: euclidean}
+
+networks:
+  extractor:
+    type: GCNFeatureExtractor
+    out_dim: 128
+    node_in: xyz
+    hidden: [16, 32, 64]
+    hops: [1, 2, 3, 4]
+    patch_size: 64
+    knn: 8
+  denoiser:
+    type: MatrixDenoiser
+    feat_dim: 128
+    dim: 128
+    heads: 4
+    depth: 6
+    n_anchors: 16
+    dropout: 0.0
+
+diffusion:
+  eta: 0.1
+  proj_iters: 6
+  schedule_s: 0.008
+  sample_steps: 50
+  final_iters: 20
+
+densifier:
+  type: FunctionalMapDensifier
+  k_fm: 120
+  n_e: 100
+  lm_bands: 20
+  lm_weight: 5.0
+  mu: 0.1
+  variance: 7.0
+
+eval:
+  sparse: true
+  dense: false
+
+train:
+  # iteration-matched to FAUST (~192k iters): SMAL_r cat train = 29 shapes (~840 pairs/epoch)
+  # vs FAUST's 80 shapes (~6400/epoch), so ~230 epochs here matches FAUST's 30.
+  total_epochs: 230
+  log_freq: 20
+  optims:
+    extractor: {type: AdamW, lr: 1e-4, weight_decay: 1e-4}
+    denoiser:  {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+  schedulers:
+    extractor: {type: CosineAnnealingLR, eta_min: 1e-5}
+    denoiser:  {type: CosineAnnealingLR, eta_min: 1e-4}
+
+val:
+  subset: 40
