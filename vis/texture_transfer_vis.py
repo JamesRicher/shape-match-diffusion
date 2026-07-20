@@ -24,6 +24,7 @@ import polyscope.imgui as psim
 from datasets import build_dataset
 from models import build_model
 from models.base_model import to_numpy
+from train import autofill_feat_dim
 from utils.data_utils import sqrt_surface_area
 from utils.options import load_yaml, resolve_experiment_paths
 from utils.texture_util import (DEFAULT_TEXTURE_FILE, create_colormap,
@@ -48,6 +49,10 @@ def parse_args():
                         help='RNG seed for pair sampling (default: random)')
     parser.add_argument('--device', default=None,
                         help="'cuda' / 'cpu'; auto-detected when omitted")
+    parser.add_argument('--independent-fps', action='store_true',
+                        help='honest independent-FPS sampling (each shape FPS\'d on its own '
+                             'geometry, no bijective GT) -- the regime dense MGE is scored in, '
+                             'where densifier symmetry flips appear')
     return parser.parse_args()
 
 
@@ -69,7 +74,9 @@ def build_eval_model(args):
     opt['path']['resume'] = False
 
     dataset = build_dataset(opt['datasets'][args.split])
-    opt['networks']['encoder']['in_dim'] = int(dataset[0]['first']['feat'].shape[-1])
+    if getattr(args, 'independent_fps', False):
+        dataset.independent_fps = True   # match evaluate.py's dense-MGE sampling regime
+    autofill_feat_dim(opt, int(dataset[0]['first']['feat'].shape[-1]))
     model = build_model(opt)  # constructor loads ckpt (net-only, is_train=False)
     model.eval()
     return model, dataset, opt
@@ -97,7 +104,12 @@ class TextureTransferVis:
         and the pair's mean geodesic error."""
         data = self.dataset[int(idx)]
         dx, dy = data['first'], data['second']
-        p2p = to_numpy(self.model.validate_single(data))     # Y -> X, [Vy]
+        # texture transfer needs a dense per-vertex p2p; validate_single returns only the
+        # sparse FPS-point map, so lift it through the densifier when one is configured
+        # (matches evaluate.py's generate_qualitative).
+        use_dense = getattr(self.model, 'densifier', None) is not None
+        p2p = to_numpy(self.model.densify_single(data) if use_dense
+                       else self.model.validate_single(data))   # Y -> X, [Vy]
 
         verts_x, faces_x = to_numpy(dx['verts']), to_numpy(dx['faces'])
         verts_y, faces_y = to_numpy(dy['verts']), to_numpy(dy['faces'])
