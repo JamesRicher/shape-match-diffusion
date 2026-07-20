@@ -53,8 +53,10 @@ densifier:
   variance: 7.0
 
 eval:
-  sparse: true
+  sparse: false
   dense: false
+  pck_max: 1.0
+  pck_n: 200
 
 train:
   total_epochs: 30
