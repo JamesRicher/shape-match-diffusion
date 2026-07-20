@@ -87,10 +87,13 @@ def _build(config_path, checkpoint, device, split):
 
 
 @torch.no_grad()
-def _sample_P0(model, F_x, F_y, D_x, D_y, temperature):
-    """One sampler draw -> P0 (n,n) DS matrix. temperature==1 uses the model's own sampler;
-    otherwise mirrors matrix_diffusion_model.sample() with a temperature-scaled initial prior."""
-    if temperature == 1.0:
+def _sample_P0(model, F_x, F_y, D_x, D_y, temperature, eta):
+    """One sampler draw -> P0 (n,n) DS matrix. temperature==1 & eta==0 uses the model's own
+    (pure-DDIM) sampler; otherwise mirrors matrix_diffusion_model.sample() with a temperature-
+    scaled initial prior and per-step DDIM<->DDPM stochastic noise (eta=0 = deterministic DDIM,
+    eta=1 = full DDPM). Injecting noise throughout the trajectory (not just the prior) is the
+    principled way to widen sample diversity when the reverse dynamics are contractive."""
+    if temperature == 1.0 and eta == 0.0:
         return model.sample(F_x, F_y, D_x, D_y)[0]
     net = model.networks['denoiser']
     B, n = F_x.shape[0], F_x.shape[1]
@@ -100,9 +103,15 @@ def _sample_P0(model, F_x, F_y, D_x, D_y, temperature):
         t_i, t_prev = ts[i], ts[i + 1]
         P_t = log_sinkhorn(u, n_iters=model.proj_iters).exp()
         u0 = net(P_t, F_x, F_y, D_x, D_y, t_i.reshape(1).expand(B))
-        ab_t, ab_p = cosine_alpha_bar(t_i, model.schedule_s), cosine_alpha_bar(t_prev, model.schedule_s)
+        ab_t = cosine_alpha_bar(t_i, model.schedule_s)
+        ab_p = cosine_alpha_bar(t_prev, model.schedule_s)
         eps = (u - ab_t.sqrt() * u0) / (1.0 - ab_t).clamp_min(1e-8).sqrt()
-        u = ab_p.sqrt() * u0 + (1.0 - ab_p).clamp_min(0.0).sqrt() * eps
+        # DDIM<->DDPM interpolation (Song et al.): eta scales the injected noise sigma; the
+        # deterministic drift coeff shrinks to keep the marginal variance consistent.
+        sigma = eta * ((1.0 - ab_p) / (1.0 - ab_t).clamp_min(1e-8)).sqrt() \
+                    * (1.0 - ab_t / ab_p.clamp_min(1e-8)).clamp_min(0.0).sqrt()
+        coeff = (1.0 - ab_p - sigma ** 2).clamp_min(0.0).sqrt()
+        u = ab_p.sqrt() * u0 + coeff * eps + sigma * torch.randn_like(u)
     return log_sinkhorn(u, n_iters=model.final_iters).exp()[0]
 
 
@@ -128,7 +137,7 @@ def _dirichlet(p2p, dist_y_s, dist_x_s, knn):
     return float((w * dX.gather(1, nn_idx) ** 2).sum())
 
 
-def run_one(cfg, checkpoint, device, split, indices_arg, num_pairs, K, temperature,
+def run_one(cfg, checkpoint, device, split, indices_arg, num_pairs, K, temperature, eta,
             criterion, knn, thresh):
     model, dataset, opt, ckpt = _build(cfg, checkpoint, device, split)
     name = opt['name']
@@ -154,7 +163,7 @@ def run_one(cfg, checkpoint, device, split, indices_arg, num_pairs, K, temperatu
 
         flips, e_dir, e_dis = [], [], []
         for _ in range(K):
-            p2p = _p2p(_sample_P0(model, F_x, F_y, D_x, D_y, temperature))
+            p2p = _p2p(_sample_P0(model, F_x, F_y, D_x, D_y, temperature, eta))
             vor = idx_x[p2p[nearest_anchor]]                           # Voronoi-propagated dense map
             err = calculate_geodesic_error(dist_x_full, corr_x, corr_y, vor, return_mean=False)
             flips.append(float(np.mean(err > thresh)))
@@ -172,8 +181,8 @@ def run_one(cfg, checkpoint, device, split, indices_arg, num_pairs, K, temperatu
 
     agg = {k: float(np.mean([r[k] for r in rows])) for k in ('baseline', 'selected', 'oracle', 'mean')}
     summary = {'name': name, 'checkpoint': ckpt, 'n_pairs': len(idxs), 'K': K,
-               'temperature': temperature, 'criterion': criterion, 'flip_thresh': thresh,
-               'aggregate': agg, 'per_pair': rows}
+               'temperature': temperature, 'eta': eta, 'criterion': criterion,
+               'flip_thresh': thresh, 'aggregate': agg, 'per_pair': rows}
     out_dir = os.path.join(_OUT_ROOT, f'{name}_sampleselect')
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, 'sample_select.json'), 'w') as f:
@@ -182,7 +191,9 @@ def run_one(cfg, checkpoint, device, split, indices_arg, num_pairs, K, temperatu
 
 
 def _print_table(summaries, criterion, K):
-    print(f"\nflip rate (fraction > thresh) | select by min {criterion} over K={K} draws\n")
+    s0 = summaries[0]
+    print(f"\nflip rate (fraction > thresh) | select by min {criterion} over K={K} draws "
+          f"(temperature={s0['temperature']}, eta={s0['eta']})\n")
     head = f"{'experiment':30s}{'baseline':>10s}{'selected':>10s}{'oracle':>10s}{'mean':>10s}"
     print(head); print('-' * len(head))
     for s in summaries:
@@ -202,6 +213,8 @@ def main():
     p.add_argument('--num-pairs', type=int, default=8, help='pairs to probe (evenly spaced)')
     p.add_argument('--pair-indices', type=int, nargs='+', default=None, help='explicit pair indices')
     p.add_argument('--temperature', type=float, default=1.0, help='initial-prior scale (>1 = more diverse)')
+    p.add_argument('--eta', type=float, default=0.0,
+                   help='per-step DDIM<->DDPM stochasticity (0 = deterministic DDIM, 1 = full DDPM)')
     p.add_argument('--criterion', default='dirichlet', choices=['dirichlet', 'distortion'],
                    help='map-energy used to select the sample')
     p.add_argument('--knn', type=int, default=8, help='neighbours for the Dirichlet graph')
@@ -215,7 +228,7 @@ def main():
     for cfg in args.config:
         summaries.append(run_one(cfg, args.checkpoint, args.device, args.split,
                                  args.pair_indices, args.num_pairs, args.k, args.temperature,
-                                 args.criterion, args.knn, args.flip_thresh))
+                                 args.eta, args.criterion, args.knn, args.flip_thresh))
     _print_table(summaries, args.criterion, args.k)
     print(f"\nper-experiment JSON under: {_OUT_ROOT}/<name>_sampleselect/")
 
