@@ -4,6 +4,7 @@ import os
 import re
 
 import numpy as np
+import yaml
 from torch.utils.data import DataLoader
 
 from datasets import build_dataset
@@ -12,7 +13,7 @@ from models.base_model import to_numpy
 from train import _single_collate, autofill_feat_dim
 from utils.data_utils import sqrt_surface_area
 from utils.logger import get_root_logger
-from utils.options import load_yaml, resolve_experiment_paths
+from utils.options import _YamlLoader, load_yaml, resolve_experiment_paths
 from utils.texture_util import (render_color_transfer_figure,
                                 render_texture_transfer_figure)
 
@@ -24,6 +25,8 @@ def build_opt(args):
     """Load the config for evaluation: force inference mode and point the model at
     the checkpoint to test (CLI ``--checkpoint`` or the experiment's ``final.pth``)."""
     opt = load_yaml(args.config)
+    for override in (args.set or []):
+        apply_override(opt, override)
     if args.name is not None:
         opt['name'] = args.name
     if args.device is not None:
@@ -36,6 +39,23 @@ def build_opt(args):
     opt['path']['resume_state'] = ckpt
     opt['path']['resume'] = False  # net-only load; don't restore optimizer/epoch state
     return opt, ckpt
+
+
+def apply_override(opt, spec):
+    """Apply one ``dotted.key=value`` override to the loaded config in place, so eval knobs can
+    be swept from the CLI without editing/copying the YAML (e.g. ``densifier.k_fm=160``).
+
+    The value is parsed as YAML so ``160`` -> int, ``0.5`` -> float, ``true`` -> bool, ``1e-3``
+    -> float (via the strict loader), and anything else stays a string. Intermediate dict keys
+    are created as needed; pair with ``--eval_tag`` so swept runs don't overwrite each other."""
+    if '=' not in spec:
+        raise ValueError(f"--set expects 'dotted.key=value', got {spec!r}")
+    key, raw = spec.split('=', 1)
+    node = opt
+    parts = key.split('.')
+    for p in parts[:-1]:
+        node = node.setdefault(p, {})
+    node[parts[-1]] = yaml.load(raw, Loader=_YamlLoader)
 
 
 def eval_tag_for(opt, override=None):
@@ -69,6 +89,10 @@ def parse_args():
                              '(default: the test dataset name); lets one model be '
                              'evaluated on several datasets without overwriting')
     parser.add_argument('--device', default=None, help="'cuda' / 'cpu'; auto-detected when omitted")
+    parser.add_argument('--set', action='append', metavar='KEY=VALUE', default=None,
+                        help='override a config value by dotted key, repeatable '
+                             '(e.g. --set densifier.k_fm=160); pair with --eval_tag to avoid '
+                             'overwriting the default run')
     parser.add_argument('--num_workers', type=int, default=0, help='dataloader workers')
     parser.add_argument('--num_qual', type=int, default=10,
                         help='number of random test pairs to render texture-transfer '
