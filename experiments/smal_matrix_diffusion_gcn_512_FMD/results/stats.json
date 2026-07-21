@@ -1,0 +1,25 @@
+{
+  "name": "smal_matrix_diffusion_gcn_512_FMD",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/smal_matrix_diffusion_gcn_512_FMD/models/final.pth",
+  "dataset": {
+    "name": "Smal_r",
+    "type": "SparsePairSmalDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "category": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "euclidean"
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.2021733522415161,
+  "auc": 0.3940452043133696,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.08284114301204681,
+  "sparse_acc": 0.43476048519736843,
+  "sparse_auc": 0.6166325570673844,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}
