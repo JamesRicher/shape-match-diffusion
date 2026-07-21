@@ -1,0 +1,53 @@
+# Cross-dataset evaluation: the FAUST-trained 512-FMD model evaluated on SCAPE_r.
+# `name` points evaluate.py at the FAUST experiment's checkpoint
+# (experiments/faust_matrix_diffusion_gcn_512_FMD/models/final.pth); datasets.test is
+# SCAPE_r, so this measures FAUST->SCAPE generalisation. Architecture is copied verbatim
+# from faust_matrix_diffusion_gcn_512_FMD.yaml (identical to the SCAPE config), which it
+# must be for the checkpoint to load. Eval only reads datasets.test.
+#   python evaluate.py -c configs/joint_gcn_diffusion/faust512FMD_eval_on_scape.yaml --num_qual 0
+# Results land in experiments/faust_matrix_diffusion_gcn_512_FMD/results/Scape_r/.
+name: faust_matrix_diffusion_gcn_512_FMD
+model_type: MatrixDiffusionModel
+is_train: true
+
+datasets:
+  # SCAPE_r test split (same spec as scape_matrix_diffusion_gcn_512_FMD.yaml's test set).
+  test: {name: Scape_r, type: SparsePairScapeDataset, phase: test, n_sparse: 512, exclude_self: true, ret_evecs: true, num_evecs: 200, fps_metric: euclidean}
+
+networks:
+  extractor:
+    type: GCNFeatureExtractor
+    out_dim: 128
+    node_in: xyz
+    hidden: [16, 32, 64]
+    hops: [1, 2, 3, 4]
+    patch_size: 64
+    knn: 8
+  denoiser:
+    type: MatrixDenoiser
+    feat_dim: 128
+    dim: 128
+    heads: 4
+    depth: 6
+    n_anchors: 16
+    dropout: 0.0
+
+diffusion:
+  eta: 0.1
+  proj_iters: 6
+  schedule_s: 0.008
+  sample_steps: 50
+  final_iters: 20
+
+densifier:
+  type: FunctionalMapDensifier
+  k_fm: 120
+  n_e: 100
+  lm_bands: 20
+  lm_weight: 5.0
+  mu: 0.1
+  variance: 7.0
+
+eval:
+  sparse: true
+  dense: false

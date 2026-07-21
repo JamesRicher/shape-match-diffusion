@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 
 import numpy as np
 from torch.utils.data import DataLoader
@@ -37,6 +38,25 @@ def build_opt(args):
     return opt, ckpt
 
 
+def eval_tag_for(opt, override=None):
+    """Directory name for one evaluation, so evaluating a model on several datasets
+    keeps each result set separate under ``results/<tag>/`` instead of overwriting.
+
+    Defaults to the test dataset's ``name`` (plus phase when not ``test``); pass
+    ``override`` (CLI ``--eval_tag``) to name it explicitly, e.g. to compare two eval
+    settings on the same dataset."""
+    if override:
+        tag = override
+    else:
+        test = opt['datasets']['test']
+        tag = str(test.get('name', 'test'))
+        phase = test.get('phase')
+        if phase and phase != 'test':
+            tag = f'{tag}_{phase}'
+    # keep it a safe single path segment
+    return re.sub(r'[^A-Za-z0-9._-]+', '_', tag).strip('_') or 'test'
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Evaluate a trained shape-matching model on the test set.')
@@ -44,6 +64,10 @@ def parse_args():
     parser.add_argument('-n', '--name', default=None, help='override experiment name (subdir of experiments/)')
     parser.add_argument('--checkpoint', default=None,
                         help='checkpoint to evaluate (default: experiments/<name>/models/final.pth)')
+    parser.add_argument('--eval_tag', default=None,
+                        help='subdir of results/ to write this evaluation into '
+                             '(default: the test dataset name); lets one model be '
+                             'evaluated on several datasets without overwriting')
     parser.add_argument('--device', default=None, help="'cuda' / 'cpu'; auto-detected when omitted")
     parser.add_argument('--num_workers', type=int, default=0, help='dataloader workers')
     parser.add_argument('--num_qual', type=int, default=10,
@@ -137,7 +161,10 @@ def evaluate(opt, ckpt, args):
     logger.info(f'Evaluating "{opt["name"]}" on {len(test_set)} test pairs '
                 f'(checkpoint: {ckpt}, device: {model.device}).')
 
-    results_dir = opt['path']['results']
+    # each evaluation lands in its own subdir of results/ (keyed by the test dataset),
+    # so evaluating this model on another dataset doesn't clobber earlier results.
+    eval_tag = eval_tag_for(opt, getattr(args, 'eval_tag', None))
+    results_dir = os.path.join(opt['path']['results'], eval_tag)
     os.makedirs(results_dir, exist_ok=True)
 
     if sparse_matcher:
@@ -176,6 +203,7 @@ def evaluate(opt, ckpt, args):
 
     stats = {
         'name': opt['name'],
+        'eval_tag': eval_tag,
         'checkpoint': ckpt,
         'dataset': opt['datasets']['test'],
         'num_test_pairs': len(test_set),

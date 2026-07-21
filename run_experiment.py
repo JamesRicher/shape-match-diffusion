@@ -17,6 +17,10 @@ def parse_args():
     # for evaluation: default (None) evaluates the just-trained final model (final.pth)
     parser.add_argument('--checkpoint', default=None,
                         help='checkpoint to evaluate (default: the run\'s final.pth)')
+    parser.add_argument('--eval_tag', default=None,
+                        help='subdir of results/ for the evaluation '
+                             '(default: the test dataset name); keeps evaluations on '
+                             'different datasets from overwriting each other')
     # forwarded to evaluate.evaluate() for the qualitative texture-transfer figures
     parser.add_argument('--num_qual', type=int, default=10,
                         help='number of random test pairs to render texture-transfer '

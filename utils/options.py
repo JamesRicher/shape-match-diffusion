@@ -38,7 +38,10 @@ def resolve_experiment_paths(opt, resume=None):
     Layout:
         experiments/<name>/   experiment_info.json (config + network stats)
         models/               checkpoints (``latest.pth`` = resumable, ``final.pth`` = final-epoch)
-        results/              all run artifacts: pck.png/pck.npy, test stats.json
+        results/              training artifacts (metrics.csv, curves)
+        results/<tag>/        one test evaluation (stats.json, pck.png/pck.npy, qual/);
+                              tag defaults to the eval dataset, so a model can be
+                              evaluated on several datasets without overwriting
 
     Shared by ``train.py`` and ``evaluate.py`` so both agree on where things live.
     ``resume`` (if given) sets ``path['resume_state']`` (checkpoint to load).
