@@ -1,0 +1,24 @@
+{
+  "name": "scape_matrix_diffusion_gcn_512_FMD",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/scape_matrix_diffusion_gcn_512_FMD/models/final.pth",
+  "dataset": {
+    "name": "Scape_r",
+    "type": "SparsePairScapeDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "euclidean"
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.14261890947818756,
+  "auc": 0.5936962759170653,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.016610369086265564,
+  "sparse_acc": 0.8364412006578947,
+  "sparse_auc": 0.9066730732489368,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}
