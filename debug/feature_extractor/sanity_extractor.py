@@ -21,10 +21,13 @@ import argparse
 import os
 import sys
 
+import numpy as np
 import torch
+import torch.nn.functional as F
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from datasets import build_dataset          # noqa: E402
+from metrics.geo_metric import calculate_geodesic_error  # noqa: E402
 from networks import build_network          # noqa: E402
 from pretrain_extractor import contrastive_loss  # noqa: E402
 from utils.options import load_yaml         # noqa: E402
@@ -36,6 +39,37 @@ def _extract(ext, shape):
     if getattr(ext, 'needs_operators', False):
         return ext.extract(shape, idx)[0]                       # DiffusionNet: reads cached ops
     return ext.extract(shape['verts'], shape['dist'], idx)[0]   # GCN: (verts, dist, idx)
+
+
+def _dense_feats(ext, shape, chunk=2048):
+    """L2-normalised per-vertex features (V, d) over the whole mesh."""
+    if getattr(ext, 'needs_operators', False):
+        f = ext.extract_dense(shape)                            # DiffusionNet: one global forward
+    else:                                                       # GCN: one patch per vertex, chunked
+        V = shape['verts'].shape[0]
+        f = torch.cat([ext.extract(shape['verts'], shape['dist'],
+                                   torch.arange(lo, min(lo + chunk, V)))[0]
+                       for lo in range(0, V, chunk)], dim=0)
+    return F.normalize(f, dim=-1)
+
+
+@torch.no_grad()
+def dense_accuracy(ext, pairs, thresh, chunk=4096):
+    """HONEST readout: per-vertex feature NN over the FULL mesh (not the 256 GT-paired sparse
+    points), scored against template GT. Unlike the bijective sparse acc, the full candidate
+    pool exposes symmetry flips. Returns (PCK@thresh, mean geodesic error) over the pairs."""
+    ext.eval()
+    errs = []
+    for pair in pairs:
+        s0, s1 = pair['first'], pair['second']
+        fx, fy = _dense_feats(ext, s0), _dense_feats(ext, s1)
+        p2p = torch.cat([(fy[lo:lo + chunk] @ fx.t()).argmax(1)
+                         for lo in range(0, fy.shape[0], chunk)]).cpu().numpy()   # (Vy,) Y->X vertex
+        errs.append(calculate_geodesic_error(
+            s0['dist'].cpu().numpy(), s0['corr'].cpu().numpy(),
+            s1['corr'].cpu().numpy(), p2p, return_mean=False))
+    cat = np.concatenate(errs)
+    return float((cat <= thresh).mean()), float(cat.mean())
 
 
 def gradient_check(ext, pair, tau):
@@ -102,6 +136,7 @@ def main():
     p.add_argument('--lr', type=float, default=1e-3, help='overfit learning rate')
     p.add_argument('--pass_acc', type=float, default=0.9, help='overfit pass threshold')
     p.add_argument('--tau', type=float, default=0.07, help='InfoNCE temperature')
+    p.add_argument('--thresh', type=float, default=0.1, help='PCK geodesic-error threshold (dense readout)')
     p.add_argument('--input_type', default=None,
                    help="override network.input_type (e.g. 'hks' for a non-trivial overfit signal)")
     p.add_argument('--device', default=None, help="'cuda'/'cpu'; auto when omitted")
@@ -129,8 +164,16 @@ def main():
           f"config {os.path.basename(args.config)} | {len(pairs)} overfit pairs\n")
 
     g_ok = gradient_check(ext, pairs[0], args.tau)
+
+    # honest dense readout before/after overfit: bijective sparse acc saturates at ~1.0 and hides
+    # symmetry flips, so also match per-vertex over the full mesh vs template GT (PCK / geo err).
+    pck0, err0 = dense_accuracy(ext, pairs, args.thresh)
+    print(f'\n[dense]     pre-overfit : PCK@{args.thresh}={pck0:.3f}  mean geo err={err0:.4f}')
     print()
     o_ok = overfit_check(ext, pairs, args.tau, args.steps, args.lr, args.pass_acc)
+    pck1, err1 = dense_accuracy(ext, pairs, args.thresh)
+    print(f'[dense]     post-overfit: PCK@{args.thresh}={pck1:.3f}  mean geo err={err1:.4f}  '
+          f'(honest; sparse acc hides symmetry flips)')
 
     print(f'\n==> {"ALL PASS" if (g_ok and o_ok) else "FAILURES PRESENT"}')
     sys.exit(0 if (g_ok and o_ok) else 1)

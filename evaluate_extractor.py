@@ -76,6 +76,43 @@ def evaluate(ext, dataset, limit=None):
 
 
 @torch.no_grad()
+def dense_features(ext, shape, chunk=2048):
+    """L2-normalised per-vertex features (V, d) over the WHOLE mesh."""
+    if getattr(ext, 'needs_operators', False):
+        f = ext.extract_dense(shape)                       # DiffusionNet: one global forward
+    else:                                                  # GCN: one patch per vertex, chunked
+        V = shape['verts'].shape[0]
+        f = torch.cat([ext.extract(shape['verts'], shape['dist'],
+                                   torch.arange(lo, min(lo + chunk, V)))[0]
+                       for lo in range(0, V, chunk)], dim=0)
+    return F.normalize(f, dim=-1)
+
+
+@torch.no_grad()
+def evaluate_dense(ext, dataset, thresh, limit=None, chunk=4096):
+    """Honest DENSE feature matching: per-vertex features on both shapes, each Y vertex matched
+    to its nearest X vertex IN FEATURE SPACE over the full vertex set (no bijective GT, full
+    candidate pool -> symmetry flips are exposed), scored against the template correspondence.
+    Reports (PCK@thresh, mean geodesic error) over all template points."""
+    n_pairs = len(dataset) if limit is None else min(limit, len(dataset))
+    errs = []
+    pbar = tqdm(range(n_pairs), desc='eval (dense)')
+    for i in pbar:
+        s0, s1 = dataset[i]['first'], dataset[i]['second']
+        fx, fy = dense_features(ext, s0), dense_features(ext, s1)   # (Vx,d), (Vy,d) on device
+        # nearest X vertex per Y vertex in feature space (cosine == dot on normalised feats)
+        p2p = torch.cat([(fy[lo:lo + chunk] @ fx.t()).argmax(1)
+                         for lo in range(0, fy.shape[0], chunk)]).cpu().numpy()   # (Vy,) Y->X vertex
+        e = calculate_geodesic_error(s0['dist'].cpu().numpy(), s0['corr'].cpu().numpy(),
+                                     s1['corr'].cpu().numpy(), p2p, return_mean=False)
+        errs.append(e)
+        cat = np.concatenate(errs)
+        pbar.set_postfix(err=f'{cat.mean():.4f}', pck=f'{(cat <= thresh).mean():.3f}')
+    cat = np.concatenate(errs)
+    return float((cat <= thresh).mean()), float(cat.mean())
+
+
+@torch.no_grad()
 def evaluate_independent(ext, dataset, thresh, limit=None):
     """Honest eval: FPS each shape independently (no bijective GT). The sparse Y->X map is
     lifted to the full mesh by nearest geodesic anchor, then scored against the template
@@ -149,7 +186,10 @@ def main():
     p.add_argument('--limit', type=int, default=None, help='evaluate only the first N pairs')
     p.add_argument('--independent', action='store_true',
                    help='FPS each shape independently (no bijective GT); score by geodesic error')
-    p.add_argument('--thresh', type=float, default=0.1, help='PCK geodesic-error threshold (--independent)')
+    p.add_argument('--dense', action='store_true',
+                   help='DENSE feature matching: per-vertex NN over the full mesh vs template GT '
+                        '(the honest extractor test; exposes symmetry flips)')
+    p.add_argument('--thresh', type=float, default=0.1, help='PCK geodesic-error threshold (--dense/--independent)')
     args = p.parse_args()
 
     device = torch.device(args.device or ('cuda' if torch.cuda.is_available() else 'cpu'))
@@ -160,7 +200,12 @@ def main():
     dataset = build_dataset(opt['datasets']['val'])
     n_eval = len(dataset) if args.limit is None else min(args.limit, len(dataset))
 
-    if args.independent:
+    if args.dense:                                     # per-vertex NN over the whole mesh
+        acc, err = evaluate_dense(ext, dataset, args.thresh, args.limit)
+        print(f'FAUST DENSE feature matching over {n_eval} pairs: '
+              f'PCK@{args.thresh} {acc:.4f} | mean geo error {err:.4f}')
+        mode, metrics = 'dense', {f'pck@{args.thresh}': acc, 'mean_geo_error': err}
+    elif args.independent:
         dataset.independent_fps = True                 # unpaired FPS sets, geodesic-error score
         acc, err = evaluate_independent(ext, dataset, args.thresh, args.limit)
         print(f'FAUST independent-FPS matching over {n_eval} pairs: '
