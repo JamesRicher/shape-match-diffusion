@@ -50,7 +50,10 @@ def load_extractor(config, ckpt, device, node_in=None, name=None):
 @torch.no_grad()
 def features(ext, shape):
     """L2-normalised sparse features (n, d) for one shape."""
-    f = ext.extract(shape['verts'], shape['dist'], shape['sparse']['idx'])[0]
+    if getattr(ext, 'needs_operators', False):          # DiffusionNet: reads cached ops off the shape
+        f = ext.extract(shape, shape['sparse']['idx'])[0]
+    else:                                               # GCN: (verts, dist, idx)
+        f = ext.extract(shape['verts'], shape['dist'], shape['sparse']['idx'])[0]
     return F.normalize(f, dim=-1)
 
 
