@@ -123,10 +123,14 @@ def main():
 
     # gradX/gradY ship as IPC-safe tuples (see _op_collate) so num_workers>0 works and prefetch
     # hides the per-shape geodesic load; pin_memory off (rebuilt sparse tensors aren't pinnable).
+    # 'spawn' start method: the parent has initialised CUDA (model on GPU), so FORKED workers
+    # inherit a broken CUDA context and crash when _load_ops builds sparse operators
+    # ('CUDA initialization error'). Spawned workers start clean; the CPU-only cache is picklable.
     train_loader = DataLoader(
         train_set, batch_size=1, shuffle=True, collate_fn=_op_collate,
         num_workers=num_workers, persistent_workers=num_workers > 0,
-        prefetch_factor=(4 if num_workers > 0 else None), pin_memory=False)
+        prefetch_factor=(4 if num_workers > 0 else None), pin_memory=False,
+        multiprocessing_context=('spawn' if num_workers > 0 else None))
 
     n_params = sum(q.numel() for q in ext.parameters())
     print(f"run '{name}' -> {run_dir}\nextractor {ext.__class__.__name__} ({n_params:,} params) "
