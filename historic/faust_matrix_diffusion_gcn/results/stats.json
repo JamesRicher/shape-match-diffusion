@@ -1,0 +1,17 @@
+{
+  "name": "faust_matrix_diffusion_gcn",
+  "checkpoint": "/data2/home/jrr25/Documents/smd-hist/experiments/faust_matrix_diffusion_gcn/models/final.pth",
+  "dataset": {
+    "name": "Faust_r",
+    "type": "SparsePairFaustDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.06508396565914154,
+  "sparse_avg_error": 0.004811936989426613,
+  "sparse_acc": 0.9586040296052631
+}

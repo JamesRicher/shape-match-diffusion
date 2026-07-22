@@ -1,0 +1,25 @@
+{
+  "name": "faust_matrix_diffusion_gcn_512_FMD_repro",
+  "eval_tag": "fm",
+  "checkpoint": "historic/faust_matrix_diffusion_gcn/models/final.pth",
+  "dataset": {
+    "name": "Faust_r",
+    "type": "SparsePairFaustDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "euclidean"
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.0354757122695446,
+  "auc": 0.8234452418926104,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.004676029551774263,
+  "sparse_acc": 0.9596576891447368,
+  "sparse_auc": 0.9768428788294126,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}
