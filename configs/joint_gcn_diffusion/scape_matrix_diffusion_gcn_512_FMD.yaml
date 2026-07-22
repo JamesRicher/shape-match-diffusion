@@ -13,7 +13,7 @@ is_train: true
 # starts at epoch 0). If best.pth does not exist yet the load is silently skipped and the
 # extractor starts RANDOM -- pretrain first.
 path:
-  resume_state: debug/feature_extractor/runs/scape_gcn_4layer/models/best.pth
+  resume_state: extractor_experiments/gcn/scape_gcn_4layer/models/best.pth
   resume: false
 
 datasets:

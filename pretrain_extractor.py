@@ -2,7 +2,7 @@
 
 Config-driven and self-contained under debug/feature_extractor/ -- kept separate from the
 real configs/ and experiments/. A run reads a debug config (network + datasets + train opts)
-and writes its checkpoints/logs to debug/feature_extractor/runs/<name>/.
+and writes its checkpoints/logs to extractor_experiments/<kind>/<name>/.
 
 Trains GCNFeatureExtractor on FAUST_r sparse pairs so matched points get aligned features:
 the sparse GT is the identity permutation over FPS points (point i of X <-> point i of Y), so
@@ -28,16 +28,32 @@ from datasets import build_dataset
 from networks import build_network
 from networks.gcn_feature_extractor import build_patches
 
-# self-contained debug area: configs live under configs/, run outputs under runs/<name>/.
+# Configs still live under debug/feature_extractor/configs/; run OUTPUTS (checkpoints + logs)
+# now live under extractor_experiments/<kind>/<name>/, grouped by extractor family.
 # Anchored to this file's directory so paths hold regardless of the caller's cwd.
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DEBUG_FE_ROOT = os.path.join(ROOT, 'debug', 'feature_extractor')
 DEFAULT_CONFIG = os.path.join(DEBUG_FE_ROOT, 'configs', 'faust_gcn_4layer.yaml')
+EXTRACTOR_EXPERIMENTS_ROOT = os.path.join(ROOT, 'extractor_experiments')
+
+# extractor network type -> run-folder family (subfolder under extractor_experiments/)
+EXTRACTOR_KIND = {'GCNFeatureExtractor': 'gcn', 'DiffusionNetExtractor': 'diffusion_net'}
 
 
-def run_paths(name):
-    """debug/feature_extractor/runs/<name>/ with models/ (checkpoints) and results/ (logs)."""
-    run_dir = os.path.join(DEBUG_FE_ROOT, 'runs', name)
+def extractor_kind(opt):
+    """Run-folder family for a config's extractor. Reads `network` (pretrain config) or
+    `networks.extractor` (joint config)."""
+    cfg = opt.get('network') or opt['networks']['extractor']
+    t = cfg['type']
+    if t not in EXTRACTOR_KIND:
+        raise KeyError(f"unknown extractor type {t!r}; add it to EXTRACTOR_KIND")
+    return EXTRACTOR_KIND[t]
+
+
+def run_paths(name, kind):
+    """extractor_experiments/<kind>/<name>/ with models/ (checkpoints) and results/ (logs).
+    `kind` groups runs by extractor family ('gcn' | 'diffusion_net')."""
+    run_dir = os.path.join(EXTRACTOR_EXPERIMENTS_ROOT, kind, name)
     models_dir = os.path.join(run_dir, 'models')
     results_dir = os.path.join(run_dir, 'results')
     os.makedirs(models_dir, exist_ok=True)
@@ -129,7 +145,7 @@ def main():
     device = torch.device(args.device or opt.get('device')
                           or ('cuda' if torch.cuda.is_available() else 'cpu'))
 
-    run_dir, models_dir, results_dir = run_paths(name)
+    run_dir, models_dir, results_dir = run_paths(name, extractor_kind(opt))
     best_ckpt = os.path.join(models_dir, 'best.pth')
     final_ckpt = os.path.join(models_dir, 'final.pth')
     tb_dir = os.path.join(run_dir, 'tb')
@@ -156,7 +172,7 @@ def main():
           f"on {device}; {len(train_set)} train / {len(val_set)} val pairs")
 
     # CSV (results/metrics.csv) + TensorBoard (tb/) via the repo's MetricLogger.
-    #   tensorboard --logdir debug/feature_extractor/runs
+    #   tensorboard --logdir extractor_experiments
     mlogger = MetricLogger(results_dir, tb_dir=tb_dir)
 
     total = args.max_steps or len(train_loader)

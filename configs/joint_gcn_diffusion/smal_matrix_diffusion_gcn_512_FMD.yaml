@@ -10,7 +10,7 @@ model_type: MatrixDiffusionModel
 is_train: true
 
 path:
-  resume_state: debug/feature_extractor/runs/smal_gcn_4layer/models/best.pth
+  resume_state: extractor_experiments/gcn/smal_gcn_4layer/models/best.pth
   resume: false
 
 datasets:

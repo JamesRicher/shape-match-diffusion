@@ -5,6 +5,7 @@ from utils.registry import NETWORK_REGISTRY
 import networks.shape_matching_transformer
 import networks.matrix_denoiser
 import networks.gcn_feature_extractor
+import networks.diffusion_net
 
 __all__ = ["build_network"]
 

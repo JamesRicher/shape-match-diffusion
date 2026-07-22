@@ -1,0 +1,69 @@
+# FAUST joint model with a DiffusionNet extractor instead of the patch-GCN. Mirrors the
+# working repro baseline (faust_matrix_diffusion_gcn_512_FMD_repro.yaml) -- same denoiser,
+# diffusion knobs, FM densifier, euclidean FPS -- only the extractor changes.
+#
+# NOTE: the extractor needs cached spectral operators every step, so ret_evecs is enabled on
+# train AND val (not just test). input_type: xyz = extrinsic (best within-FAUST symmetry);
+# switch to 'hks' for an intrinsic, cross-dataset-transferable extractor (symmetry-ambiguous).
+# The extractor trains from scratch here (no pretrain checkpoint yet); DiffusionNet is stable
+# end-to-end. See pretrain_extractor.py to add a contrastive pretrain (needs an operator-based
+# collate rather than the patch collate).
+name: faust_diffusionnet_512_FMD
+model_type: MatrixDiffusionModel
+is_train: true
+
+datasets:
+  train: {name: Faust_r, type: SparsePairFaustDataset, phase: train, n_sparse: 512, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  val:   {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 512, exclude_self: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  test:  {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 512, exclude_self: true, ret_evecs: true, num_evecs: 200, fps_metric: euclidean}
+
+networks:
+  extractor:
+    type: DiffusionNetExtractor
+    out_dim: 128          # = denoiser.feat_dim
+    input_type: xyz       # 'xyz' (extrinsic) or 'hks' (intrinsic, transferable)
+    hidden: 128
+    n_block: 4
+    k_eig: 128            # <= datasets.*.num_evecs
+    hks_count: 16         # only used when input_type: hks
+  denoiser:
+    type: MatrixDenoiser
+    feat_dim: 128
+    dim: 128
+    heads: 4
+    depth: 6
+    n_anchors: 16
+    dropout: 0.0
+
+diffusion:
+  eta: 0.1
+  proj_iters: 6
+  schedule_s: 0.008
+  sample_steps: 50
+  final_iters: 20
+
+densifier:
+  type: FunctionalMapDensifier
+  k_fm: 120
+  n_e: 100
+  lm_bands: 20
+  lm_weight: 5.0
+  mu: 0.1
+  variance: 7.0
+
+eval:
+  sparse: true
+  dense: false
+
+train:
+  total_epochs: 30
+  log_freq: 20
+  optims:
+    extractor: {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+    denoiser:  {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+  schedulers:
+    extractor: {type: CosineAnnealingLR, eta_min: 1e-4}
+    denoiser:  {type: CosineAnnealingLR, eta_min: 1e-4}
+
+val:
+  subset: 40

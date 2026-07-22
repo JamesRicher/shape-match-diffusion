@@ -10,7 +10,7 @@ is_train: true
 # checkpoint has no optimizer/iter state, so a full resume would error. If the file does not
 # exist yet the load is silently skipped and the extractor starts RANDOM, so pretrain first.
 path:
-  resume_state: debug/feature_extractor/runs/faust_gcn_4layer_48patch/models/final.pth
+  resume_state: extractor_experiments/gcn/faust_gcn_4layer_48patch/models/final.pth
   resume: false
 
 datasets:

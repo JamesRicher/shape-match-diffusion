@@ -1,0 +1,33 @@
+# DEBUG DiffusionNet feature-extractor pretraining config (standalone, no diffusion).
+# Self-contained under debug/feature_extractor/ -- separate from the real configs/ experiments/.
+# Outputs go to extractor_experiments/<kind>/<name>/.
+#   python pretrain_diffusionnet.py -c debug/feature_extractor/configs/faust_diffusionnet.yaml
+# Warm-start the joint model from best.pth (path.resume_state in the joint config).
+
+name: faust_diffusionnet          # run dir = extractor_experiments/<kind>/<name>/
+# device: cuda            # optional; auto-detected when omitted
+
+datasets:
+  # ret_evecs: true is REQUIRED -- DiffusionNet reads cached spectral operators each step.
+  # num_evecs must be >= network.k_eig. fps_metric euclidean to match the good FAUST regime.
+  train: {name: Faust_r, type: SparsePairFaustDataset, phase: train, n_sparse: 256, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  val:   {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 256, exclude_self: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+
+# the feature extractor to pretrain (same class the joint config registers as `extractor`)
+network:
+  type: DiffusionNetExtractor
+  out_dim: 128
+  input_type: xyz         # 'xyz' (extrinsic) or 'hks' (intrinsic, cross-dataset-transferable)
+  hidden: 128
+  n_block: 4
+  k_eig: 128              # <= datasets.*.num_evecs
+  hks_count: 16           # only used when input_type: hks
+
+# contrastive pretraining (symmetric InfoNCE over the bijective sparse GT)
+train:
+  epochs: 50
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  tau: 0.07               # InfoNCE temperature
+  num_workers: 4          # DataLoader workers (pin_memory off: collate ships sparse gradX/gradY)
+  eval_limit: 40          # val pairs scored each epoch (null = all)

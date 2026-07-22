@@ -78,10 +78,14 @@ class MatrixDiffusionModel(BaseModel):
         xs, ys = dx['sparse'], dy['sparse']
         b = lambda z: (z.unsqueeze(0) if z.dim() == 2 else z).to(self.device).float()
         D_x, D_y = b(xs['dist']), b(ys['dist'])
-        if 'extractor' in self.networks:                            # learnable GCN features
-            ext = self.networks['extractor']                        # local full-mesh patches
-            F_x = ext.extract(dx['verts'], dx['dist'], xs['idx'])   # per FPS point (1, n, d)
-            F_y = ext.extract(dy['verts'], dy['dist'], ys['idx'])
+        if 'extractor' in self.networks:                            # learnable features
+            ext = self.networks['extractor']
+            if getattr(ext, 'needs_operators', False):              # DiffusionNet: reads cached ops
+                F_x = ext.extract(dx, xs['idx'])                    # per FPS point (1, n, d)
+                F_y = ext.extract(dy, ys['idx'])
+            else:                                                   # GCN: local full-mesh patches
+                F_x = ext.extract(dx['verts'], dx['dist'], xs['idx'])
+                F_y = ext.extract(dy['verts'], dy['dist'], ys['idx'])
         else:                                                       # frozen .npy features
             F_x, F_y = b(xs['feat']), b(ys['feat'])
         if self.ablate_features:                                    # P_t-only diagnostic

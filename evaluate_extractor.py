@@ -27,7 +27,7 @@ from networks import build_network
 from densifiers.nearest_anchor import NearestAnchorDensifier
 from densifiers.base_densifier import DensifyContext
 from metrics.geo_metric import calculate_geodesic_error
-from pretrain_extractor import DEFAULT_CONFIG, run_paths
+from pretrain_extractor import DEFAULT_CONFIG, run_paths, extractor_kind
 
 
 def load_extractor(config, ckpt, device, node_in=None, name=None):
@@ -37,9 +37,9 @@ def load_extractor(config, ckpt, device, node_in=None, name=None):
     if node_in is not None:
         cfg['node_in'] = node_in
     ext = build_network(cfg).to(device).eval()
-    # default checkpoint: this run's best.pth under debug/feature_extractor/runs/<name>/.
+    # default checkpoint: this run's best.pth under extractor_experiments/<kind>/<name>/.
     if ckpt is None:
-        ckpt = os.path.join(run_paths(name or opt['name'])[1], 'best.pth')
+        ckpt = os.path.join(run_paths(name or opt['name'], extractor_kind(opt))[1], 'best.pth')
     print(f'loading {ckpt}')
     state = torch.load(ckpt, map_location='cpu')
     sd = state['networks']['extractor'] if 'networks' in state else state
@@ -171,7 +171,7 @@ def main():
 
     # persist to the run's results/ dir (same convention as evaluate.py's stats.json). The
     # two eval modes report different metrics, so key the filename by mode to avoid clobbering.
-    results_dir = run_paths(args.name or opt['name'])[2]
+    results_dir = run_paths(args.name or opt['name'], extractor_kind(opt))[2]
     stats = {
         'name': opt['name'],
         'checkpoint': ckpt,

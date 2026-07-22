@@ -9,7 +9,7 @@ model_type: MatrixDiffusionModel
 is_train: true
 
 path:
-  resume_state: debug/feature_extractor/runs/faust_gcn_4layer_48patch/models/final.pth
+  resume_state: extractor_experiments/gcn/faust_gcn_4layer_48patch/models/final.pth
   resume: false
 
 datasets:
