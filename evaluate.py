@@ -93,6 +93,8 @@ def parse_args():
                         help='override a config value by dotted key, repeatable '
                              '(e.g. --set densifier.k_fm=160); pair with --eval_tag to avoid '
                              'overwriting the default run')
+    parser.add_argument('--no_sparse', action='store_true',
+                        help='skip the [2/2] bijective sparse-stats pass (dense MGE only)')
     parser.add_argument('--num_workers', type=int, default=0, help='dataloader workers')
     parser.add_argument('--num_qual', type=int, default=10,
                         help='number of random test pairs to render texture-transfer '
@@ -209,13 +211,16 @@ def evaluate(opt, ckpt, args):
         else:
             logger.info('[1/2] dense MGE skipped (no densifier configured)')
 
-        test_set.independent_fps = False
-        model.report_sparse, model.report_dense = True, False
-        logger.info('[2/2] sparse stats (bijective FPS)')
-        sparse_metrics = model.validation(test_loader, out_dir=None)
-        for k, v in sparse_metrics.items():
-            # avg_error/acc are the sparse stats; keep them explicit about the regime.
-            metrics[f'sparse_{k}' if k in ('avg_error', 'acc') else k] = v
+        if getattr(args, 'no_sparse', False):
+            logger.info('[2/2] sparse stats skipped (--no_sparse)')
+        else:
+            test_set.independent_fps = False
+            model.report_sparse, model.report_dense = True, False
+            logger.info('[2/2] sparse stats (bijective FPS)')
+            sparse_metrics = model.validation(test_loader, out_dir=None)
+            for k, v in sparse_metrics.items():
+                # avg_error/acc are the sparse stats; keep them explicit about the regime.
+                metrics[f'sparse_{k}' if k in ('avg_error', 'acc') else k] = v
     else:
         # pure evaluation pass. out_dir sends pck.png / pck.npy to results/ (the same
         # dir stats.json is written to).
