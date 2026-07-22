@@ -1,16 +1,18 @@
-# FAUST joint model with a DiffusionNet extractor instead of the patch-GCN. Mirrors the
-# working repro baseline (faust_matrix_diffusion_gcn_512_FMD_repro.yaml) -- same denoiser,
-# diffusion knobs, FM densifier, euclidean FPS -- only the extractor changes.
-#
-# NOTE: the extractor needs cached spectral operators every step, so ret_evecs is enabled on
-# train AND val (not just test). input_type: xyz = extrinsic (best within-FAUST symmetry);
-# switch to 'hks' for an intrinsic, cross-dataset-transferable extractor (symmetry-ambiguous).
-# The extractor trains from scratch here (no pretrain checkpoint yet); DiffusionNet is stable
-# end-to-end. See pretrain_extractor.py to add a contrastive pretrain (needs an operator-based
-# collate rather than the patch collate).
+# FAUST joint model: DiffusionNet extractor (warm-started from HKS pretrain) + FM densifier.
+# WARM-START: net-only load fills `extractor` from the pretrained checkpoint, denoiser stays
+# random, starts at epoch 0. `resume: false` required. If best.pth is missing the load is
+# silently skipped and the extractor starts RANDOM -- pretrain first:
+#   python pretrain_diffusionnet.py -c debug/feature_extractor/configs/faust_diffusionnet_hks.yaml --num_workers 8
+#   python run_experiment.py -c configs/joint_diffusionnet/faust_diffusionnet_512_FMD.yaml --num_qual 0 --num_workers 8
+# Extractor arch MUST match the pretrain config exactly (hks, hidden 128, n_block 4, k_eig 128).
+# For a COLD-START ablation instead: drop the `path:` block and set both LRs to 1e-3.
 name: faust_diffusionnet_512_FMD
 model_type: MatrixDiffusionModel
 is_train: true
+
+path:
+  resume_state: extractor_experiments/diffusion_net/faust_diffusionnet_hks/models/best.pth
+  resume: false
 
 datasets:
   train: {name: Faust_r, type: SparsePairFaustDataset, phase: train, n_sparse: 512, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
@@ -20,12 +22,12 @@ datasets:
 networks:
   extractor:
     type: DiffusionNetExtractor
-    out_dim: 128          # = denoiser.feat_dim
-    input_type: xyz       # 'xyz' (extrinsic) or 'hks' (intrinsic, transferable)
+    out_dim: 128
+    input_type: hks
     hidden: 128
     n_block: 4
-    k_eig: 128            # <= datasets.*.num_evecs
-    hks_count: 16         # only used when input_type: hks
+    k_eig: 128
+    hks_count: 16
   denoiser:
     type: MatrixDenoiser
     feat_dim: 128
@@ -59,10 +61,11 @@ train:
   total_epochs: 30
   log_freq: 20
   optims:
-    extractor: {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+    # warm-started extractor: gentle fine-tune (10x lower LR); denoiser trains from scratch
+    extractor: {type: AdamW, lr: 1e-4, weight_decay: 1e-4}
     denoiser:  {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
   schedulers:
-    extractor: {type: CosineAnnealingLR, eta_min: 1e-4}
+    extractor: {type: CosineAnnealingLR, eta_min: 1e-5}
     denoiser:  {type: CosineAnnealingLR, eta_min: 1e-4}
 
 val:

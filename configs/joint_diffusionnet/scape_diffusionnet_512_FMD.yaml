@@ -1,0 +1,69 @@
+# SCAPE_r joint model: DiffusionNet extractor (warm-started from HKS pretrain) + FM densifier.
+# Mirrors faust_diffusionnet_512_FMD.yaml; only the dataset, extractor checkpoint, and epoch
+# count differ. Pretrain the extractor FIRST:
+#   python pretrain_diffusionnet.py -c debug/feature_extractor/configs/scape_diffusionnet_hks.yaml --num_workers 8
+#   python run_experiment.py -c configs/joint_diffusionnet/scape_diffusionnet_512_FMD.yaml --num_qual 0 --num_workers 8
+name: scape_diffusionnet_512_FMD
+model_type: MatrixDiffusionModel
+is_train: true
+
+path:
+  resume_state: extractor_experiments/diffusion_net/scape_diffusionnet_hks/models/best.pth
+  resume: false
+
+datasets:
+  train: {name: Scape_r, type: SparsePairScapeDataset, phase: train, n_sparse: 512, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  val:   {name: Scape_r, type: SparsePairScapeDataset, phase: test,  n_sparse: 512, exclude_self: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  test:  {name: Scape_r, type: SparsePairScapeDataset, phase: test,  n_sparse: 512, exclude_self: true, ret_evecs: true, num_evecs: 200, fps_metric: euclidean}
+
+networks:
+  extractor:
+    type: DiffusionNetExtractor
+    out_dim: 128
+    input_type: hks
+    hidden: 128
+    n_block: 4
+    k_eig: 128
+    hks_count: 16
+  denoiser:
+    type: MatrixDenoiser
+    feat_dim: 128
+    dim: 128
+    heads: 4
+    depth: 6
+    n_anchors: 16
+    dropout: 0.0
+
+diffusion:
+  eta: 0.1
+  proj_iters: 6
+  schedule_s: 0.008
+  sample_steps: 50
+  final_iters: 20
+
+densifier:
+  type: FunctionalMapDensifier
+  k_fm: 120
+  n_e: 100
+  lm_bands: 20
+  lm_weight: 5.0
+  mu: 0.1
+  variance: 7.0
+
+eval:
+  sparse: true
+  dense: false
+
+train:
+  # ~80% of FAUST's joint budget; 2601 pairs/epoch (matches the SCAPE GCN FMD config)
+  total_epochs: 60
+  log_freq: 20
+  optims:
+    extractor: {type: AdamW, lr: 1e-4, weight_decay: 1e-4}
+    denoiser:  {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+  schedulers:
+    extractor: {type: CosineAnnealingLR, eta_min: 1e-5}
+    denoiser:  {type: CosineAnnealingLR, eta_min: 1e-4}
+
+val:
+  subset: 40
