@@ -21,7 +21,7 @@ network:
   hks_count: 16           # number of HKS bands fed in
 
 train:
-  epochs: 50
+  epochs: 25
   lr: 1.0e-3
   weight_decay: 1.0e-4
   tau: 0.07               # InfoNCE temperature
