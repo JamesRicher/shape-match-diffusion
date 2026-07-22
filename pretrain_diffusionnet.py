@@ -30,9 +30,10 @@ from networks import build_network
 # reuse the identical loss/eval-metric contract and run-dir layout from the GCN pretrainer
 from pretrain_extractor import contrastive_loss, triplet_loss, run_paths, extractor_kind
 
-# fields DiffusionNetExtractor.extract() reads off a shape dict (everything else, incl. the big
-# (N,N) geodesic, is dropped in the collate to keep worker->main IPC small).
-_OP_KEYS = ('verts', 'evecs', 'evals', 'mass', 'gradX', 'gradY')
+# Dense operator fields DiffusionNetExtractor.extract() reads off a shape dict; the big (N,N)
+# geodesic is dropped in the collate to keep worker->main IPC small.
+_DENSE_KEYS = ('verts', 'evecs', 'evals', 'mass')
+_SPARSE_KEYS = ('gradX', 'gradY')
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CONFIG = os.path.join(ROOT, 'debug', 'feature_extractor', 'configs', 'faust_diffusionnet.yaml')
@@ -40,15 +41,29 @@ DEFAULT_CONFIG = os.path.join(ROOT, 'debug', 'feature_extractor', 'configs', 'fa
 
 def _op_collate(batch):
     """batch_size=1 collate: keep each shape's spectral operators + FPS idx, drop the rest.
-    Returns {'first': {op fields.., 'idx'}, 'second': {...}}."""
+
+    Torch sparse tensors don't survive DataLoader worker->main IPC on many builds (the reason
+    num_workers>0 errored), so gradX/gradY are shipped as plain (indices, values, size) tuples
+    and rebuilt with _restore_sparse in the main thread. Returns {'first': {..}, 'second': {..}}."""
     pair = batch[0]
     out = {}
     for key in ('first', 'second'):
         s = pair[key]
-        d = {k: s[k] for k in _OP_KEYS if k in s}
+        d = {k: s[k] for k in _DENSE_KEYS if k in s}
+        for k in _SPARSE_KEYS:                                    # IPC-safe: dense (idx, val, size)
+            g = s[k].coalesce()
+            d[k] = (g.indices(), g.values(), tuple(g.size()))
         d['idx'] = s['sparse']['idx']
         out[key] = d
     return out
+
+
+def _restore_sparse(shape):
+    """Rebuild gradX/gradY sparse tensors from the collate's IPC-safe tuples, in place."""
+    for k in _SPARSE_KEYS:
+        idx, val, size = shape[k]
+        shape[k] = torch.sparse_coo_tensor(idx, val, torch.Size(size)).coalesce()
+    return shape
 
 
 @torch.no_grad()
@@ -106,8 +121,8 @@ def main():
     optim = torch.optim.AdamW(ext.parameters(), lr=lr, weight_decay=wd)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=epochs, eta_min=lr * 0.1)
 
-    # The collate ships torch sparse gradX/gradY, so pin_memory is off (unsupported for sparse).
-    # If sparse tensors error over worker IPC on your torch build, run with --num_workers 0.
+    # gradX/gradY ship as IPC-safe tuples (see _op_collate) so num_workers>0 works and prefetch
+    # hides the per-shape geodesic load; pin_memory off (rebuilt sparse tensors aren't pinnable).
     train_loader = DataLoader(
         train_set, batch_size=1, shuffle=True, collate_fn=_op_collate,
         num_workers=num_workers, persistent_workers=num_workers > 0,
@@ -131,6 +146,7 @@ def main():
         for pair in pbar:
             if args.max_steps is not None and step >= args.max_steps:
                 break
+            _restore_sparse(pair['first']); _restore_sparse(pair['second'])   # rebuild gradX/gradY
             fx = ext.extract(pair['first'], pair['first']['idx'])[0]   # full-mesh DiffusionNet -> FPS pts
             fy = ext.extract(pair['second'], pair['second']['idx'])[0]
             loss, acc = loss_fn(fx, fy)
