@@ -92,13 +92,67 @@ def _seed_worker(worker_id: int):
 # --------------------------------------------------------------------------- #
 # data helpers
 # --------------------------------------------------------------------------- #
-def _single_collate(batch):
-    """batch_size=1 collate that returns the sample untouched.
+# Torch sparse operators (L/gradX/gradY) don't survive DataLoader worker->main IPC on many
+# builds, and building them in a FORKED worker after the parent inits CUDA throws a
+# 'CUDA initialization error'. So the collate ships sparse tensors as picklable
+# (tag, indices, values, size) tuples, spawn workers build them cleanly, and _RestoringLoader
+# rebuilds them in the main process. All transparent to train()/model.validation.
+_SPARSE_TAG = '__sparse_coo__'
 
-    The shape pairs hold variable-size and sparse tensors (operators), which the
-    default collate cannot stack, so we train one pair at a time.
+
+def _to_ipc_safe(obj):
+    """Recursively replace sparse tensors with picklable (tag, indices, values, size) tuples."""
+    if isinstance(obj, torch.Tensor):
+        if obj.is_sparse:
+            g = obj.coalesce()
+            return (_SPARSE_TAG, g.indices(), g.values(), tuple(g.size()))
+        return obj
+    if isinstance(obj, dict):
+        return {k: _to_ipc_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return type(obj)(_to_ipc_safe(v) for v in obj)
+    return obj
+
+
+def _restore_sparse(obj):
+    """Inverse of _to_ipc_safe: rebuild sparse tensors in the main process. Invariant checks are
+    off -- the tuples come from already-coalesced, validated cached operators."""
+    if isinstance(obj, tuple) and len(obj) == 4 and obj[0] == _SPARSE_TAG:
+        _, idx, val, size = obj
+        with torch.sparse.check_sparse_tensor_invariants(enable=False):
+            return torch.sparse_coo_tensor(idx, val, torch.Size(size)).coalesce()
+    if isinstance(obj, dict):
+        return {k: _restore_sparse(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return type(obj)(_restore_sparse(v) for v in obj)
+    return obj
+
+
+class _RestoringLoader:
+    """Wraps a DataLoader to rebuild the IPC-safe sparse operators in the main process.
+    Transparent: preserves len() and attribute access (e.g. .dataset)."""
+    def __init__(self, loader):
+        self._loader = loader
+
+    def __iter__(self):
+        for item in self._loader:
+            yield _restore_sparse(item)
+
+    def __len__(self):
+        return len(self._loader)
+
+    def __getattr__(self, name):
+        return getattr(self._loader, name)
+
+
+def _single_collate(batch):
+    """batch_size=1 collate: return the sample, with sparse operators made IPC-safe.
+
+    The shape pairs hold variable-size and sparse tensors (operators), which the default collate
+    cannot stack, so we train one pair at a time; sparse tensors are converted for worker IPC
+    (see _RestoringLoader).
     """
-    return batch[0]
+    return _to_ipc_safe(batch[0])
 
 
 def autofill_feat_dim(opt, feat_dim):
@@ -148,13 +202,16 @@ def build_dataloaders(opt, num_workers):
     if repeat and repeat > 1:
         train_set = ConcatDataset([train_set] * int(repeat))
 
-    train_loader = DataLoader(train_set, batch_size=1, shuffle=True,
-                              collate_fn=_single_collate, num_workers=num_workers,
-                              worker_init_fn=_seed_worker)
-    val_loader = DataLoader(val_set, batch_size=1, shuffle=False,
-                            collate_fn=_single_collate, num_workers=num_workers,
-                            worker_init_fn=_seed_worker)
-    return train_set, train_loader, val_loader
+    # 'spawn' so forked workers don't inherit the parent's CUDA context (operators build sparse
+    # tensors in the worker); persistent workers + prefetch hide the per-shape geodesic load.
+    mp_ctx = 'spawn' if num_workers > 0 else None
+    common = dict(collate_fn=_single_collate, num_workers=num_workers,
+                  worker_init_fn=_seed_worker, multiprocessing_context=mp_ctx,
+                  persistent_workers=num_workers > 0,
+                  prefetch_factor=(4 if num_workers > 0 else None))
+    train_loader = DataLoader(train_set, batch_size=1, shuffle=True, **common)
+    val_loader = DataLoader(val_set, batch_size=1, shuffle=False, **common)
+    return train_set, _RestoringLoader(train_loader), _RestoringLoader(val_loader)
 
 
 # --------------------------------------------------------------------------- #

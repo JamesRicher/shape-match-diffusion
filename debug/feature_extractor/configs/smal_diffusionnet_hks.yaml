@@ -1,0 +1,30 @@
+# DEBUG DiffusionNet pretraining on SMAL_r with INTRINSIC (HKS) input.
+# Mirror of faust_diffusionnet_hks.yaml; only the dataset changes (category split, euclidean FPS).
+#   python pretrain_diffusionnet.py -c debug/feature_extractor/configs/smal_diffusionnet_hks.yaml --num_workers 8
+#   python evaluate_extractor.py    -c debug/feature_extractor/configs/smal_diffusionnet_hks.yaml --dense --no_vis
+
+name: smal_diffusionnet_hks       # run dir = extractor_experiments/diffusion_net/<name>/
+# device: cuda            # optional; auto-detected when omitted
+
+datasets:
+  # ret_evecs: true REQUIRED (num_evecs >= network.k_eig). category: true = canonical species-held-out
+  # split (ULRSSM protocol); euclidean FPS matches the good regime.
+  train: {name: Smal_r, type: SparsePairSmalDataset, phase: train, n_sparse: 256, category: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  val:   {name: Smal_r, type: SparsePairSmalDataset, phase: test,  n_sparse: 256, exclude_self: true, category: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+
+network:
+  type: DiffusionNetExtractor
+  out_dim: 128
+  input_type: hks         # intrinsic HKS descriptors (transferable, symmetry-ambiguous)
+  hidden: 128
+  n_block: 4
+  k_eig: 128              # <= datasets.*.num_evecs
+  hks_count: 16           # number of HKS bands fed in
+
+train:
+  epochs: 50
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  tau: 0.07               # InfoNCE temperature
+  num_workers: 4          # pin_memory off (collate ships sparse gradX/gradY)
+  eval_limit: 40          # val pairs scored each epoch (null = all)
