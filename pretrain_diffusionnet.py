@@ -59,10 +59,13 @@ def _op_collate(batch):
 
 
 def _restore_sparse(shape):
-    """Rebuild gradX/gradY sparse tensors from the collate's IPC-safe tuples, in place."""
-    for k in _SPARSE_KEYS:
-        idx, val, size = shape[k]
-        shape[k] = torch.sparse_coo_tensor(idx, val, torch.Size(size)).coalesce()
+    """Rebuild gradX/gradY sparse tensors from the collate's IPC-safe tuples, in place.
+    Invariant checks are explicitly disabled: the tuples come from already-coalesced, validated
+    cached operators, so re-checking is redundant (and silences torch's implicit-disable warning)."""
+    with torch.sparse.check_sparse_tensor_invariants(enable=False):
+        for k in _SPARSE_KEYS:
+            idx, val, size = shape[k]
+            shape[k] = torch.sparse_coo_tensor(idx, val, torch.Size(size)).coalesce()
     return shape
 
 
