@@ -165,10 +165,15 @@ def run(config_path, checkpoint, device, K, num_pairs, seed, sample_eta, n_iso_p
 
     out_dir = os.path.join(_OUT_ROOT, name)
     os.makedirs(out_dir, exist_ok=True)
-    tag = '' if sample_eta == 0.0 else f'_eta{sample_eta:g}'
-    np.savez(os.path.join(out_dir, f'selector{tag}.npz'), **rows)
-    with open(os.path.join(out_dir, f'selector{tag}.json'), 'w') as f:
+    # tag with the source model + K + eta so runs never clobber (dir is keyed by the -c config,
+    # so a FAUST checkpoint on a SCAPE config lands beside a native SCAPE run otherwise).
+    ckpt_stem = os.path.basename(os.path.dirname(os.path.dirname(ckpt)))
+    eta_tag = '' if sample_eta == 0.0 else f'_eta{sample_eta:g}'
+    tag = f'selector_{ckpt_stem}_K{K}{eta_tag}'
+    np.savez(os.path.join(out_dir, f'{tag}.npz'), **rows)
+    with open(os.path.join(out_dir, f'{tag}.json'), 'w') as f:
         json.dump(summary, f, indent=2)
+    summary['out_file'] = os.path.join(out_dir, f'{tag}.json')
     return summary
 
 
@@ -205,9 +210,10 @@ def main():
     p.add_argument('--seed', type=int, default=0)
     p.add_argument('--device', default=None)
     args = p.parse_args()
-    _print(run(args.config, args.checkpoint, args.device, args.K,
-               args.num_pairs, args.seed, args.eta, args.n_iso_pairs))
-    print(f"\nper-pair arrays + JSON under: {os.path.join(_OUT_ROOT, '<name>')}/")
+    s = run(args.config, args.checkpoint, args.device, args.K,
+            args.num_pairs, args.seed, args.eta, args.n_iso_pairs)
+    _print(s)
+    print(f"\nwrote: {s['out_file']}")
 
 
 if __name__ == '__main__':
