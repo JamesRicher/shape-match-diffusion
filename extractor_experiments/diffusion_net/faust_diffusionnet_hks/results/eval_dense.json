@@ -1,0 +1,19 @@
+{
+  "name": "faust_diffusionnet_hks",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/extractor_experiments/diffusion_net/faust_diffusionnet_hks/models/best.pth",
+  "config": "debug/feature_extractor/configs/faust_diffusionnet_hks.yaml",
+  "dataset": {
+    "name": "Faust_r",
+    "type": "SparsePairFaustDataset",
+    "phase": "test",
+    "n_sparse": 256,
+    "exclude_self": true,
+    "fps_metric": "euclidean",
+    "ret_evecs": true,
+    "num_evecs": 128
+  },
+  "mode": "dense",
+  "num_eval_pairs": 380,
+  "pck@0.1": 0.9984442105263158,
+  "mean_geo_error": 0.014350727200508118
+}
