@@ -24,12 +24,14 @@ import torch
 from utils.registry import DENSIFIER_REGISTRY
 from utils.spectral_features import shared_wks_grid, wks_coefs, wks_on_grid
 from .base_densifier import BaseDensifier, DensifyContext
+from .spectral_refine import zoomout_refine
 
 
 @DENSIFIER_REGISTRY.register()
 class FunctionalMapDensifier(BaseDensifier):
     """WKS + wave-kernel-landmark functional-map densifier with Laplacian-commutativity
-    regularisation. densify() returns the hard nearest-neighbour p2p (Y vertex -> X vertex)."""
+    regularisation. densify() returns the hard nearest-neighbour p2p (Y vertex -> X vertex),
+    optionally ZoomOut-refined (zoomout_refine: true) starting from that readout."""
 
     def __init__(self, opt=None):
         super().__init__(opt)
@@ -42,6 +44,15 @@ class FunctionalMapDensifier(BaseDensifier):
         self.mu = o.get('mu', 1e-1)               # Laplacian-commutativity weight
         self.chunk = o.get('chunk', 512)          # Y rows per NN block (memory bound)
         self.eps = o.get('eps', 1e-8)
+        # optional ZoomOut post-refinement of the one-shot p2p readout (shared spectral_refine).
+        # Seeds ZoomOut from this densifier's descriptor+landmark map -- a far better start than
+        # ZoomOutDensifier's Voronoi bootstrap. zo_k_final=0 -> use all available eigenfunctions.
+        # NB keep zo_k_start moderate: too-low k re-averages over the near-symmetric low band and
+        # can smooth a correct region toward its mirror (see notes on symmetry flips).
+        self.zoomout = o.get('zoomout_refine', False)
+        self.zo_k_start = o.get('zo_k_start', 40)
+        self.zo_k_step = o.get('zo_k_step', 20)
+        self.zo_k_final = o.get('zo_k_final', 0)
         self._landmarks = None                    # (m_x, l_y) set per densify() call
 
     @staticmethod
@@ -141,4 +152,9 @@ class FunctionalMapDensifier(BaseDensifier):
         A, B, exk, eyk, vx, vy = self._descriptors(ctx, dev)
         C = self._solve_fm(A, B, vx, vy)
         emb_x = exk @ C.T                                                 # (Vx, k_y) X in Y basis
-        return self._nn_p2p(emb_x, eyk)                                   # (Vy,) Y -> X
+        p2p = self._nn_p2p(emb_x, eyk)                                    # (Vy,) Y -> X one-shot NN
+        if self.zoomout:                                                 # seed ZoomOut from this p2p
+            k_final = self.zo_k_final or ctx.evecs_x.shape[1]
+            p2p = zoomout_refine(p2p, ctx.evecs_x.to(dev), ctx.evecs_y.to(dev), ctx.mass_y,
+                                 self.zo_k_start, self.zo_k_step, k_final, chunk=self.chunk)
+        return p2p

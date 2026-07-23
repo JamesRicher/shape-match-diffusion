@@ -7,7 +7,7 @@ from .base_densifier import BaseDensifier, DensifyContext
 import densifiers.functional_map
 import densifiers.nearest_anchor
 import densifiers.row_stochastic
-import densifiers.zoomout
+import densifiers.spectral_refine   # ZoomOutDensifier + the shared zoomout_refine helper
 
 __all__ = ["build_densifier", "BaseDensifier", "DensifyContext"]
 
