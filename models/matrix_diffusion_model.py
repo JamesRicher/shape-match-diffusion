@@ -192,14 +192,26 @@ class MatrixDiffusionModel(BaseModel):
         """Build a DensifyContext from a dataset item's full-mesh fields (un-batched, dim-2
         tensors under the batch_size=1 single collate). Optional fields (feats, spectral ops)
         are left None when absent, so each densifier reads only what it needs. When the
-        densifier declares gcn_feats and a GCN extractor is present, the frozen .npy feat field
-        is replaced by densely extracted GCN descriptors (one patch per full-mesh vertex)."""
+        densifier wants model features (feat_source gcn/diffnet) and a matching TRAINED extractor
+        is present, the frozen .npy feat field is replaced by dense descriptors from that
+        extractor (GCN: one patch per vertex; DiffusionNet: one per-vertex forward). The extractor
+        is self.networks['extractor'], restored from the joint checkpoint, so these are the fully
+        fine-tuned features -- not the pretrained warm start. If no matching extractor is present,
+        feat_x/feat_y are left as loaded so the densifier falls back to its own signal (e.g. WKS)."""
         x, y = data['first'], data['second']
         feat_x, feat_y = x.get('feat'), y.get('feat')
-        want_gcn = self.densifier is not None and getattr(self.densifier, 'gcn_feats', False)
-        if want_gcn and 'extractor' in self.networks:
-            feat_x = self._dense_gcn_feats(x['verts'], x['dist'])
-            feat_y = self._dense_gcn_feats(y['verts'], y['dist'])
+        want_feats = self.densifier is not None and getattr(self.densifier, 'wants_model_feats', False)
+        if want_feats:
+            ext = self.networks.get('extractor')
+            src = self.densifier.feat_source
+            is_diffnet = getattr(ext, 'needs_operators', False) if ext is not None else False
+            if src == 'diffnet' and is_diffnet:                 # dense DiffusionNet per-vertex
+                feat_x, feat_y = ext.extract_dense(x), ext.extract_dense(y)
+            elif src == 'gcn' and ext is not None and not is_diffnet:  # dense GCN patch per vertex
+                feat_x = self._dense_gcn_feats(x['verts'], x['dist'])
+                feat_y = self._dense_gcn_feats(y['verts'], y['dist'])
+            else:                                               # cannot produce them -> WKS fallback
+                feat_x, feat_y = None, None                     # never leak a stray .npy feat
         return DensifyContext(
             idx_x=x['sparse']['idx'], idx_y=y['sparse']['idx'],
             n_x=x['dist'].shape[0], n_y=y['dist'].shape[0],

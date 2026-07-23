@@ -43,6 +43,7 @@ diffusion:
 
 densifier:
   type: FunctionalMapDensifier
+  feat_source: diffnet   # dense global data term from the trained DiffusionNet extractor (falls back to WKS if absent)
   k_fm: 120
   n_e: 100
   lm_bands: 20

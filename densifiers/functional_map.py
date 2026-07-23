@@ -3,8 +3,10 @@
 Two signals set the map, both as spectral descriptor-preservation constraints on a functional
 map C (k_y x k_x) that transfers functions from X to Y:
 
-  * global  -- dense WKS descriptors on both shapes (on one shared energy grid so bands
-    correspond), which fix the coarse, near-isometric alignment.
+  * global  -- a dense per-vertex descriptor field on both shapes, which fixes the coarse,
+    near-isometric alignment. By default this is the network-free WKS signature (on one shared
+    energy grid so bands correspond); with feat_source=diffnet (or gcn) it is instead the trained
+    extractor's dense descriptors, supplied by the model, falling back to WKS if absent.
   * landmark -- each sparse correspondence enters as wave-kernel "bumps": the Gaussian
     band-passed response of a delta at the landmark, in the standard WKS sense. In the LBO basis
     the bump for landmark p at energy e has the closed-form spectral coefficient
@@ -60,13 +62,22 @@ class FunctionalMapDensifier(BaseDensifier):
 
         energies, sigma = shared_wks_grid(vx, vy, self.n_e, self.variance, self.eps)
 
-        # global WKS (full spectrum for a richer signature), projected into the truncated basis
-        Wx = wks_on_grid(vx, ex, energies, sigma, self.eps)                 # (Vx, n_e)
-        Wy = wks_on_grid(vy, ey, energies, sigma, self.eps)
         exk, eyk = ex[:, :k], ey[:, :k]
         etx = (exk * mx[:, None]).T                                         # (k, Vx) = Phi^T M
         ety = (eyk * my[:, None]).T
-        Ax_g, Ay_g = etx @ Wx, ety @ Wy                                     # (k, n_e) each
+
+        # global descriptor block, projected into the truncated basis (etx @ field -> (k, D)):
+        # trained DiffusionNet features when feat_source=diffnet supplies them (filled by the
+        # model), else fall back to the network-free WKS signature.
+        use_feat = (self.feat_source in ('gcn', 'diffnet')
+                    and ctx.feat_x is not None and ctx.feat_y is not None)
+        if use_feat:
+            Gx = ctx.feat_x.to(dev).float()                                # (Vx, d)
+            Gy = ctx.feat_y.to(dev).float()
+        else:
+            Gx = wks_on_grid(vx, ex, energies, sigma, self.eps)            # (Vx, n_e)
+            Gy = wks_on_grid(vy, ey, energies, sigma, self.eps)
+        Ax_g, Ay_g = etx @ Gx, ety @ Gy                                    # (k, D) each
         Ax_g, Ay_g = self._normalise_pair(Ax_g, Ay_g, self.eps)
         # divide each block by sqrt(#columns) so its trace contribution is 1 regardless of how
         # many constraints it holds; landmark strength is then set solely by lm_weight, decoupled

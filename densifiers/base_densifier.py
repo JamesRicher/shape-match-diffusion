@@ -46,7 +46,7 @@ class DensifyContext:
 class BaseDensifier(ABC):
     """Lift a sparse p2p to a dense whole-shape p2p. Subclasses register in DENSIFIER_REGISTRY."""
 
-    FEAT_SOURCES = ('frozen', 'gcn', 'wks')
+    FEAT_SOURCES = ('frozen', 'gcn', 'wks', 'diffnet')
 
     def __init__(self, opt: Optional[dict] = None):
         self.opt = opt or {}
@@ -57,11 +57,17 @@ class BaseDensifier(ABC):
         #               extractor, fills ctx.feat_x/feat_y before densify (see self.gcn_feats).
         #   'wks'    -- Wave Kernel Signature, computed by the densifier from ctx.evecs/evals
         #               (network-free; needs the dataset's ret_evecs).
+        #   'diffnet'-- dense per-vertex DiffusionNet descriptors from the model's TRAINED
+        #               extractor (extract_dense), filled by the model like 'gcn'. Falls back
+        #               to the densifier's own signal (e.g. WKS) if no DiffusionNet extractor
+        #               is present, so ctx.feat_x/feat_y stay None.
         # A densifier with no data term simply ignores this.
         self.feat_source = self.opt.get('feat_source', 'frozen')
         if self.feat_source not in self.FEAT_SOURCES:
             raise ValueError(f"feat_source must be one of {self.FEAT_SOURCES}, got {self.feat_source!r}")
-        self.gcn_feats = self.feat_source == 'gcn'   # the only source needing model fulfilment
+        self.gcn_feats = self.feat_source == 'gcn'   # kept for back-compat
+        # sources the model must fulfil by densely running its own extractor before densify()
+        self.wants_model_feats = self.feat_source in ('gcn', 'diffnet')
 
     @abstractmethod
     def densify(self, sparse_p2p: torch.Tensor, ctx: DensifyContext) -> torch.Tensor:
