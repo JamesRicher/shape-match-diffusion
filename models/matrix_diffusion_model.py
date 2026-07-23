@@ -127,8 +127,15 @@ class MatrixDiffusionModel(BaseModel):
     # sampling / inference
     # ------------------------------------------------------------------ #
     @torch.no_grad()
-    def sample(self, F_x, F_y, D_x, D_y, steps=None, return_trajectory=False):
+    def sample(self, F_x, F_y, D_x, D_y, steps=None, return_trajectory=False, sample_eta=0.0):
         """DDIM (predict-x0) reverse process in logit space. Returns P0 (B, n_y, n_x) DS.
+
+        sample_eta: generalized-DDIM stochasticity (Song et al. 2020, eq. 12). 0.0 = deterministic
+        DDIM (default, unchanged behaviour); 1.0 = full DDPM ancestral sampling. Values >0 inject
+        per-step noise so independent draws diverge into different modes -- the knob for the
+        sample-diversity / best-of-K experiments. NOTE it pushes the reverse-trajectory P_t off
+        the deterministic training distribution, so large values are increasingly off-manifold.
+        Distinct from self.eta (the logit-target label smoothing).
 
         The read-in projection uses tau=1 (proj_iters) to match training exactly -- the
         denoiser only ever saw temperate P_t, so annealing the read-in would be
@@ -159,7 +166,13 @@ class MatrixDiffusionModel(BaseModel):
             ab_t = cosine_alpha_bar(t_i, self.schedule_s)
             ab_p = cosine_alpha_bar(t_prev, self.schedule_s)
             eps_hat = (u - ab_t.sqrt() * u0_hat) / (1.0 - ab_t).clamp_min(1e-8).sqrt()
-            u = ab_p.sqrt() * u0_hat + (1.0 - ab_p).clamp_min(0.0).sqrt() * eps_hat
+            # generalized DDIM: sigma=0 -> deterministic (default); sigma at eta=1 -> DDPM.
+            # (1-ab_p) is 0 at the final step (t_prev=0 -> ab_p=1) so no noise is added there.
+            sigma = sample_eta * ((1.0 - ab_p) / (1.0 - ab_t).clamp_min(1e-8)).sqrt() \
+                    * (1.0 - ab_t / ab_p.clamp_min(1e-8)).clamp_min(0.0).sqrt()
+            u = ab_p.sqrt() * u0_hat + ((1.0 - ab_p) - sigma ** 2).clamp_min(0.0).sqrt() * eps_hat
+            if sample_eta > 0.0:
+                u = u + sigma * torch.randn_like(u)
 
         P0 = log_sinkhorn(u, n_iters=self.final_iters).exp()       # converged DS for Hungarian
         if return_trajectory:

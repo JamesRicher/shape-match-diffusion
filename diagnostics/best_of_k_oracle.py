@@ -49,16 +49,16 @@ def _hungarian(P0):
 
 
 @torch.no_grad()
-def _k_sample_maps(model, data, K):
-    """K sparse maps from K diffusion samples (K different noise inits, batched)."""
+def _k_sample_maps(model, data, K, sample_eta):
+    """K sparse maps from K diffusion samples (different noise inits + per-step DDIM noise)."""
     F_x, F_y, D_x, D_y, _ = model._sparse_inputs(data)
     rep = lambda z: z.repeat(K, *([1] * (z.dim() - 1)))
-    P0 = model.sample(rep(F_x), rep(F_y), rep(D_x), rep(D_y))     # (K, n_y, n_x)
+    P0 = model.sample(rep(F_x), rep(F_y), rep(D_x), rep(D_y), sample_eta=sample_eta)  # (K, n_y, n_x)
     return [_hungarian(P0[k]) for k in range(K)]
 
 
 @torch.no_grad()
-def run(config_path, checkpoint, device, K, num_pairs, seed):
+def run(config_path, checkpoint, device, K, num_pairs, seed, sample_eta):
     model, dataset, opt, ckpt = _build(config_path, checkpoint, device, 'config')
     name = opt['name']
     idxs = (list(range(len(dataset))) if not num_pairs else
@@ -69,7 +69,8 @@ def run(config_path, checkpoint, device, K, num_pairs, seed):
     for i in tqdm(idxs, desc=f'{name} best-of-{K} (dense MGE)'):
         data = dataset[i]
         nn_mge.append(_dense_mge(model, data, _feature_nn_sparse_map(model, data)).mean())
-        per_sample = [ _dense_mge(model, data, m).mean() for m in _k_sample_maps(model, data, K) ]
+        per_sample = [ _dense_mge(model, data, m).mean()
+                       for m in _k_sample_maps(model, data, K, sample_eta) ]
         per_sample = np.array(per_sample)
         single_mge.append(per_sample[0])          # K=1: one sample, the current model
         oracle_mge.append(per_sample.min())       # best of K under true GT (upper bound)
@@ -91,7 +92,7 @@ def run(config_path, checkpoint, device, K, num_pairs, seed):
                       'oracle_mean_on_flipped': float(oracle_arr[flipped].mean()),
                       'rescued_frac': float(np.mean(oracle_arr[flipped] <= 0.1))}  # oracle brings <0.1
 
-    summary = {'name': name, 'checkpoint': ckpt, 'K': K, 'n_pairs': len(idxs),
+    summary = {'name': name, 'checkpoint': ckpt, 'K': K, 'n_pairs': len(idxs), 'sample_eta': sample_eta,
                'feature_nn': agg(nn_mge), 'single_sample': agg(single_mge),
                'oracle_K': agg(oracle_mge), 'worst_K': agg(worst_mge),
                'oracle_gain_vs_single': float(single_arr.mean() - oracle_arr.mean()),
@@ -99,15 +100,16 @@ def run(config_path, checkpoint, device, K, num_pairs, seed):
                'on_flipped_pairs': flip_block}
     out_dir = os.path.join(_OUT_ROOT, name)
     os.makedirs(out_dir, exist_ok=True)
-    np.savez(os.path.join(out_dir, 'best_of_k.npz'),
+    tag = '' if sample_eta == 0.0 else f'_eta{sample_eta:g}'
+    np.savez(os.path.join(out_dir, f'best_of_k{tag}.npz'),
              nn=nn_mge, single=single_mge, oracle=oracle_mge, worst=worst_mge)
-    with open(os.path.join(out_dir, 'best_of_k.json'), 'w') as f:
+    with open(os.path.join(out_dir, f'best_of_k{tag}.json'), 'w') as f:
         json.dump(summary, f, indent=2)
     return summary
 
 
 def _print(s):
-    print(f"\n{s['name']}   K={s['K']}   pairs={s['n_pairs']}   ckpt={s['checkpoint']}")
+    print(f"\n{s['name']}   K={s['K']}   sample_eta={s['sample_eta']}   pairs={s['n_pairs']}   ckpt={s['checkpoint']}")
     print(f"\n{'matcher':>14} {'dense MGE':>11} {'median':>9} {'gross>0.1':>11}")
     print('-' * 48)
     for key, lab in [('feature_nn', 'feature-NN'), ('single_sample', 'single (K=1)'),
@@ -135,10 +137,11 @@ def main():
     p.add_argument('-K', type=int, default=8, help='samples per pair')
     p.add_argument('--num-pairs', type=int, default=60, help='cap pairs (densify is Kx slower); 0 = all')
     p.add_argument('--seed', type=int, default=0)
-    p.add_argument('--eta', type=float, default=0.0, help='(placeholder; DDIM sampler is deterministic)')
+    p.add_argument('--eta', type=float, default=0.0,
+                   help='DDIM->DDPM sampler stochasticity: 0=deterministic, 1=full DDPM. Sweep it.')
     p.add_argument('--device', default=None)
     args = p.parse_args()
-    _print(run(args.config, args.checkpoint, args.device, args.K, args.num_pairs, args.seed))
+    _print(run(args.config, args.checkpoint, args.device, args.K, args.num_pairs, args.seed, args.eta))
     print(f"\nper-pair arrays + JSON under: {os.path.join(_OUT_ROOT, '<name>')}/")
 
 
