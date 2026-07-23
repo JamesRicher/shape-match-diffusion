@@ -96,9 +96,10 @@ def _sample_P0(model, data, K, sample_eta):
 
 
 @torch.no_grad()
-def run(config_path, checkpoint, device, K, num_pairs, seed, sample_eta, n_iso_pairs):
+def run(config_path, checkpoint, device, K, num_pairs, seed, sample_eta, n_iso_pairs, split, exclude_self):
     from tqdm import tqdm
-    model, dataset, opt, ckpt = _build(config_path, checkpoint, device, 'config')
+    model, dataset, opt, ckpt = _build(config_path, checkpoint, device, 'config',
+                                       split=split, exclude_self=exclude_self)
     name = opt['name']
     idxs = (list(range(len(dataset))) if not num_pairs else
             sorted(np.random.default_rng(seed).choice(len(dataset),
@@ -163,7 +164,7 @@ def run(config_path, checkpoint, device, K, num_pairs, seed, sample_eta, n_iso_p
 
     corr_pooled = {m: float(spearmanr(pooled[m], pooled_mge).correlation) for m in pooled}
     corr_within = {m: (float(np.mean(within[m])) if within[m] else None) for m in pooled}
-    summary = {'name': name, 'checkpoint': ckpt, 'K': K, 'sample_eta': sample_eta,
+    summary = {'name': name, 'checkpoint': ckpt, 'K': K, 'sample_eta': sample_eta, 'split': split,
                'n_pairs': len(idxs), 'n_iso_pairs': n_iso_pairs,
                'feature_nn': block(rows['feature_nn']),
                'single': block(rows['single']), 'oracle': block(rows['oracle']),
@@ -177,7 +178,7 @@ def run(config_path, checkpoint, device, K, num_pairs, seed, sample_eta, n_iso_p
     # so a FAUST checkpoint on a SCAPE config lands beside a native SCAPE run otherwise).
     ckpt_stem = os.path.basename(os.path.dirname(os.path.dirname(ckpt)))
     eta_tag = '' if sample_eta == 0.0 else f'_eta{sample_eta:g}'
-    tag = f'selector_{ckpt_stem}_K{K}{eta_tag}'
+    tag = f'selector_{ckpt_stem}_{split}_K{K}{eta_tag}'
     np.savez(os.path.join(out_dir, f'{tag}.npz'), **rows,
              score_mge=np.stack(raw_mge),                      # (n_pairs, K) true MGE per sample
              **{f'score_{m}': np.stack(raw[m]) for m in raw})  # (n_pairs, K) each score -> offline tuning
@@ -188,7 +189,7 @@ def run(config_path, checkpoint, device, K, num_pairs, seed, sample_eta, n_iso_p
 
 
 def _print(s):
-    print(f"\n{s['name']}  K={s['K']}  eta={s['sample_eta']}  pairs={s['n_pairs']}  ckpt={s['checkpoint']}")
+    print(f"\n{s['name']}  split={s['split']}  K={s['K']}  eta={s['sample_eta']}  pairs={s['n_pairs']}  ckpt={s['checkpoint']}")
     print(f"\nscore->MGE Spearman  (within-pair = what selection can exploit; pooled inflated by difficulty):")
     print(f"    {'score':>9} {'within':>8} {'pooled':>8}")
     for m in s['score_spearman_within_pair']:
@@ -219,11 +220,14 @@ def main():
     p.add_argument('--num-pairs', type=int, default=100, help='cap pairs (densify is Kx); 0 = all')
     p.add_argument('--eta', type=float, default=0.0, help='DDIM->DDPM sampler stochasticity')
     p.add_argument('--n-iso-pairs', type=int, default=2000, help='long-range Y pairs for isometry defect')
-    p.add_argument('--seed', type=int, default=0)
+    p.add_argument('--split', default='test', choices=['train', 'val', 'test'],
+                   help="dataset split: tune hyperparameters on 'train' (held-out), report on 'test'")
+    p.add_argument('--exclude-self', action='store_true', help='drop identity self-pairs (i==j)')
+    p.add_argument('--seed', type=int, default=0, help='seed for the random pair subset (unbiased)')
     p.add_argument('--device', default=None)
     args = p.parse_args()
-    s = run(args.config, args.checkpoint, args.device, args.K,
-            args.num_pairs, args.seed, args.eta, args.n_iso_pairs)
+    s = run(args.config, args.checkpoint, args.device, args.K, args.num_pairs, args.seed,
+            args.eta, args.n_iso_pairs, args.split, args.exclude_self)
     _print(s)
     print(f"\nwrote: {s['out_file']}")
 

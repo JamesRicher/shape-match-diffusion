@@ -52,9 +52,11 @@ _OUT_ROOT = os.path.join(os.path.dirname(__file__), 'results')
 calculate_geodesic_error = build_metric({"type": "calculate_geodesic_error"})
 
 
-def _build(config_path, checkpoint, device, fps_metric):
-    """Load a trained checkpoint + its test dataset like evaluate.py, forced into the honest
-    independent-FPS regime with dense reporting on (the densifier is required)."""
+def _build(config_path, checkpoint, device, fps_metric, split='test', exclude_self=False):
+    """Load a trained checkpoint + a dataset split like evaluate.py, forced into the honest
+    independent-FPS regime with dense reporting on (the densifier is required). `split` selects
+    datasets.<split> -- use 'train' as a held-out set for tuning selector hyperparameters, so the
+    reported 'test' numbers stay uncontaminated (ret_evecs is forced on so the densifier works)."""
     opt = load_yaml(config_path)
     if device is not None:
         opt['device'] = device
@@ -67,7 +69,12 @@ def _build(config_path, checkpoint, device, fps_metric):
     opt['path']['resume'] = False
     opt.setdefault('eval', {})['dense'] = True                       # densifier path must be built
 
-    dataset = build_dataset(opt['datasets']['test'])
+    ds_opt = dict(opt['datasets'][split])
+    ds_opt['ret_evecs'] = True                                       # densifier needs eigenbases
+    ds_opt.setdefault('num_evecs', opt['datasets'].get('test', {}).get('num_evecs', 128))
+    if exclude_self:
+        ds_opt['exclude_self'] = True                               # drop identity self-pairs
+    dataset = build_dataset(ds_opt)
     dataset.independent_fps = True                                   # honest sampling (dense MGE regime)
     if fps_metric != 'config':
         dataset.fps_metric = fps_metric
