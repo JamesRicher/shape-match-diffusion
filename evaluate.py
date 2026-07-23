@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from datasets import build_dataset
 from models import build_model
 from models.base_model import to_numpy
-from train import _single_collate, autofill_feat_dim
+from train import _single_collate, _RestoringLoader, autofill_feat_dim
 from utils.data_utils import sqrt_surface_area
 from utils.logger import get_root_logger
 from utils.options import _YamlLoader, load_yaml, resolve_experiment_paths
@@ -175,8 +175,11 @@ def evaluate(opt, ckpt, args):
     # regimes, so we report them in two passes (see below). Non-sparse datasets lack the
     # flag and take the plain single pass in the else branch.
     sparse_matcher = hasattr(test_set, 'independent_fps')
-    test_loader = DataLoader(test_set, batch_size=1, shuffle=False,
-                             collate_fn=_single_collate, num_workers=args.num_workers)
+    # _single_collate ships sparse operators (gradX/gradY) as IPC-safe tuples; _RestoringLoader
+    # rebuilds them in the main process (as in train.py). Required for the DiffusionNet extractor,
+    # which reads those operators; harmless otherwise.
+    test_loader = _RestoringLoader(DataLoader(test_set, batch_size=1, shuffle=False,
+                             collate_fn=_single_collate, num_workers=args.num_workers))
 
     # match each network's input dim to the actual per-vertex feature dim (as in train.py)
     autofill_feat_dim(opt, int(test_set[0]['first']['feat'].shape[-1]))
