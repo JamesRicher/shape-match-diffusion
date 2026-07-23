@@ -31,7 +31,7 @@ import numpy as np
 import torch
 from scipy.stats import spearmanr
 
-from diagnostics.nn_baseline_dense import _build
+from diagnostics.nn_baseline_dense import _build, _dense_mge, _feature_nn_sparse_map
 from diagnostics.best_of_k_oracle import _hungarian
 from metrics import build_metric
 from models.base_model import to_numpy
@@ -39,7 +39,7 @@ from models.base_model import to_numpy
 _OUT_ROOT = os.path.join(os.path.dirname(__file__), 'results')
 calculate_geodesic_error = build_metric({"type": "calculate_geodesic_error"})
 
-SELECTORS = ['isometry', 'coverage', 'cycle', 'combined']
+SELECTORS = ['isometry', 'coverage', 'cycle', 'iso+cov', 'combined']
 
 
 # --------------------------------------------------------------------------- #
@@ -107,10 +107,12 @@ def run(config_path, checkpoint, device, K, num_pairs, seed, sample_eta, n_iso_p
     # per-pair: true MGE of single/oracle/each selector; pooled (score, mge) for correlation;
     # and WITHIN-pair rank correlation (the number that actually predicts selection quality --
     # pooled correlation is inflated by between-pair difficulty, which selection cannot exploit).
-    rows = {k: [] for k in ['single', 'oracle'] + SELECTORS}
+    rows = {k: [] for k in ['feature_nn', 'single', 'oracle'] + SELECTORS}
     pooled = {m: [] for m in ['isometry', 'coverage', 'cycle']}
     pooled_mge = []
     within = {m: [] for m in ['isometry', 'coverage', 'cycle']}
+    raw = {m: [] for m in ['isometry', 'coverage', 'cycle']}   # per-pair (K,) score arrays
+    raw_mge = []                                                # per-pair (K,) true MGE -> offline tuning
 
     for pi in tqdm(idxs, desc=f'{name} selector K={K} eta={sample_eta}'):
         data = dataset[pi]
@@ -133,18 +135,23 @@ def run(config_path, checkpoint, device, K, num_pairs, seed, sample_eta, n_iso_p
             sc['coverage'][k] = _coverage_defect(dense, mass_x, mass_y)
             sc['cycle'][k] = _cycle_defect(P0[k], dy_sparse)
 
+        rows['feature_nn'].append(_dense_mge(model, data, _feature_nn_sparse_map(model, data)).mean())
         rows['single'].append(mge[0])
         rows['oracle'].append(mge.min())
         rows['isometry'].append(mge[sc['isometry'].argmin()])
         rows['coverage'].append(mge[sc['coverage'].argmin()])
         rows['cycle'].append(mge[sc['cycle'].argmin()])
-        combined = _zscore(sc['isometry']) + _zscore(sc['coverage']) + _zscore(sc['cycle'])
+        iso_cov = _zscore(sc['isometry']) + _zscore(sc['coverage'])           # cycle dropped
+        rows['iso+cov'].append(mge[iso_cov.argmin()])
+        combined = iso_cov + _zscore(sc['cycle'])
         rows['combined'].append(mge[combined.argmin()])
         for m in pooled:
             pooled[m].extend(sc[m].tolist())
+            raw[m].append(sc[m])
             if mge.std() > 1e-9 and sc[m].std() > 1e-9:          # within-pair rank corr
                 within[m].append(spearmanr(sc[m], mge).correlation)
         pooled_mge.extend(mge.tolist())
+        raw_mge.append(mge)
 
     rows = {k: np.asarray(v) for k, v in rows.items()}
     single_m, oracle_m = rows['single'].mean(), rows['oracle'].mean()
@@ -158,6 +165,7 @@ def run(config_path, checkpoint, device, K, num_pairs, seed, sample_eta, n_iso_p
     corr_within = {m: (float(np.mean(within[m])) if within[m] else None) for m in pooled}
     summary = {'name': name, 'checkpoint': ckpt, 'K': K, 'sample_eta': sample_eta,
                'n_pairs': len(idxs), 'n_iso_pairs': n_iso_pairs,
+               'feature_nn': block(rows['feature_nn']),
                'single': block(rows['single']), 'oracle': block(rows['oracle']),
                'selectors': {k: block(rows[k]) for k in SELECTORS},
                'score_spearman_within_pair': corr_within,
@@ -170,7 +178,9 @@ def run(config_path, checkpoint, device, K, num_pairs, seed, sample_eta, n_iso_p
     ckpt_stem = os.path.basename(os.path.dirname(os.path.dirname(ckpt)))
     eta_tag = '' if sample_eta == 0.0 else f'_eta{sample_eta:g}'
     tag = f'selector_{ckpt_stem}_K{K}{eta_tag}'
-    np.savez(os.path.join(out_dir, f'{tag}.npz'), **rows)
+    np.savez(os.path.join(out_dir, f'{tag}.npz'), **rows,
+             score_mge=np.stack(raw_mge),                      # (n_pairs, K) true MGE per sample
+             **{f'score_{m}': np.stack(raw[m]) for m in raw})  # (n_pairs, K) each score -> offline tuning
     with open(os.path.join(out_dir, f'{tag}.json'), 'w') as f:
         json.dump(summary, f, indent=2)
     summary['out_file'] = os.path.join(out_dir, f'{tag}.json')
@@ -187,8 +197,10 @@ def _print(s):
         print(f"    {m:>9} {ws:>8} {s['score_spearman_pooled'][m]:>+8.3f}")
     print(f"\n{'method':>12} {'dense MGE':>11} {'gross>0.1':>11} {'oracle-recovery':>16}")
     print('-' * 52)
-    for lab, key in [('single K=1', ('single',)), ('sel:isometry', ('selectors', 'isometry')),
+    for lab, key in [('feature-NN', ('feature_nn',)), ('single K=1', ('single',)),
+                     ('sel:isometry', ('selectors', 'isometry')),
                      ('sel:coverage', ('selectors', 'coverage')), ('sel:cycle', ('selectors', 'cycle')),
+                     ('sel:iso+cov', ('selectors', 'iso+cov')),
                      ('sel:COMBINED', ('selectors', 'combined')), ('ORACLE', ('oracle',))]:
         b = s
         for kk in key:
