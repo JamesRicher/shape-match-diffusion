@@ -1,0 +1,18 @@
+{
+  "name": "runB_patch48_euc",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/runB_patch48_euc/models/final.pth",
+  "fps_metric": "euclidean",
+  "n_pairs": 380,
+  "flip_thresh": 0.2,
+  "acc_tol": 0.05,
+  "independent_sparse": {
+    "avg_error": 0.16683220863342285,
+    "acc_at_tol": 0.6639905427631579,
+    "flip_rate": 0.23782894736842106,
+    "gross_gt_0.1": 0.27787314967105264
+  },
+  "bijective_reference": {
+    "sparse_acc": 0.9448756167763158,
+    "sparse_avg_error": 0.006028757430613041
+  }
+}

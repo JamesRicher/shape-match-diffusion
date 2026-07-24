@@ -1,0 +1,20 @@
+{
+  "name": "scape_diffusionnet_512_FMD",
+  "checkpoint": "experiments/faust_diffusionnet_512_FMD/models/final.pth",
+  "n_pairs": 380,
+  "fps_metric": "euclidean",
+  "feat_source": "diffnet",
+  "nn_baseline": {
+    "dense_MGE": 0.0578387975692749,
+    "median": 0.02355324849486351,
+    "p90": 0.06857430934906006,
+    "gross_gt_0.1": 0.06479842105263157
+  },
+  "diffusion": {
+    "dense_MGE": 0.05693695694208145,
+    "median": 0.023991359397768974,
+    "p90": 0.07017768919467926,
+    "gross_gt_0.1": 0.06505263157894736
+  },
+  "delta_MGE_nn_minus_diffusion": 0.0009018406271934509
+}

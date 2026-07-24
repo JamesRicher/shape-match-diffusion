@@ -1,0 +1,21 @@
+{
+  "name": "runB_patch48_euc",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/runB_patch48_euc/models/final.pth",
+  "n_pairs": 380,
+  "flip_thresh": 0.2,
+  "dense_voronoi": {
+    "mean": 0.18175289034843445,
+    "flip_rate": 0.24118894736842106,
+    "gross_gt_0.1": 0.2862015789473684
+  },
+  "dense_fm": {
+    "mean": 0.15348011255264282,
+    "flip_rate": 0.20648368421052632,
+    "gross_gt_0.1": 0.2405678947368421
+  },
+  "dense_gtlm": {
+    "mean": 0.012396934442222118,
+    "flip_rate": 0.0009431578947368421,
+    "gross_gt_0.1": 0.0015952631578947368
+  }
+}

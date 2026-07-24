@@ -1,0 +1,20 @@
+{
+  "name": "faust_matrix_diffusion_gcn_512_FMD_repro",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/faust_matrix_diffusion_gcn_512_FMD_repro/models/final.pth",
+  "n_pairs": 380,
+  "fps_metric": "euclidean",
+  "feat_source": "frozen",
+  "nn_baseline": {
+    "dense_MGE": 0.16845089197158813,
+    "median": 0.02621406875550747,
+    "p90": 0.6874840259552002,
+    "gross_gt_0.1": 0.25872105263157896
+  },
+  "diffusion": {
+    "dense_MGE": 0.020339757204055786,
+    "median": 0.015819886699318886,
+    "p90": 0.03212887793779373,
+    "gross_gt_0.1": 0.0062394736842105265
+  },
+  "delta_MGE_nn_minus_diffusion": 0.14811113476753235
+}

@@ -1,0 +1,18 @@
+{
+  "name": "faust_matrix_diffusion_gcn_512_redo",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/faust_matrix_diffusion_gcn_512_redo/models/final.pth",
+  "fps_metric": "geodesic",
+  "n_pairs": 380,
+  "flip_thresh": 0.2,
+  "acc_tol": 0.05,
+  "independent_sparse": {
+    "avg_error": 0.10879863798618317,
+    "acc_at_tol": 0.7725997121710526,
+    "flip_rate": 0.1370322779605263,
+    "gross_gt_0.1": 0.16591282894736842
+  },
+  "bijective_reference": {
+    "sparse_acc": 0.9719058388157895,
+    "sparse_avg_error": 0.0029045080300420523
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "scape_diffusionnet_512_FMD",
+  "eval_tag": "faust_learned_feats_in_fm",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/scape_diffusionnet_512_FMD/models/final.pth",
+  "dataset": {
+    "name": "Faust_r",
+    "type": "SparsePairFaustDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "euclidean"
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.020065506920218468,
+  "auc": 0.809729750132908,
+  "pck_max": 0.1,
+  "pck_n": 100
+}

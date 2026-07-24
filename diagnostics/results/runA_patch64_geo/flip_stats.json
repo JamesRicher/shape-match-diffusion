@@ -1,0 +1,21 @@
+{
+  "name": "runA_patch64_geo",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/runA_patch64_geo/models/final.pth",
+  "n_pairs": 380,
+  "flip_thresh": 0.2,
+  "dense_voronoi": {
+    "mean": 0.17110465466976166,
+    "flip_rate": 0.21697052631578947,
+    "gross_gt_0.1": 0.2635221052631579
+  },
+  "dense_fm": {
+    "mean": 0.13414034247398376,
+    "flip_rate": 0.17791736842105263,
+    "gross_gt_0.1": 0.2200542105263158
+  },
+  "dense_gtlm": {
+    "mean": 0.012396934442222118,
+    "flip_rate": 0.0009431578947368421,
+    "gross_gt_0.1": 0.0015952631578947368
+  }
+}

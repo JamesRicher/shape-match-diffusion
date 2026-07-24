@@ -1,0 +1,20 @@
+{
+  "name": "scape_matrix_diffusion_gcn_512_FMD",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/scape_matrix_diffusion_gcn_512_FMD/models/final.pth",
+  "n_pairs": 380,
+  "fps_metric": "euclidean",
+  "feat_source": "frozen",
+  "nn_baseline": {
+    "dense_MGE": 0.18447943031787872,
+    "median": 0.03924933075904846,
+    "p90": 0.6553104519844055,
+    "gross_gt_0.1": 0.32112052631578947
+  },
+  "diffusion": {
+    "dense_MGE": 0.1396816074848175,
+    "median": 0.02463443949818611,
+    "p90": 0.5222403407096863,
+    "gross_gt_0.1": 0.23356684210526316
+  },
+  "delta_MGE_nn_minus_diffusion": 0.04479782283306122
+}

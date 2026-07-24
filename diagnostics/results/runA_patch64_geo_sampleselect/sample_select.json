@@ -1,0 +1,718 @@
+{
+  "name": "runA_patch64_geo",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/runA_patch64_geo/models/final.pth",
+  "n_pairs": 100,
+  "K": 25,
+  "temperature": 1.0,
+  "eta": 0.0,
+  "criterion": "dirichlet",
+  "flip_thresh": 0.2,
+  "aggregate": {
+    "baseline": 0.19629199999999994,
+    "selected": 0.19255,
+    "oracle": 0.18002799999999997,
+    "mean": 0.19571408
+  },
+  "per_pair": [
+    {
+      "pair": 0,
+      "baseline": 0.036,
+      "selected": 0.0264,
+      "oracle": 0.0264,
+      "mean": 0.036680000000000004
+    },
+    {
+      "pair": 4,
+      "baseline": 0.038,
+      "selected": 0.0352,
+      "oracle": 0.0244,
+      "mean": 0.03528
+    },
+    {
+      "pair": 8,
+      "baseline": 0.0366,
+      "selected": 0.0334,
+      "oracle": 0.0334,
+      "mean": 0.04416799999999999
+    },
+    {
+      "pair": 11,
+      "baseline": 0.07,
+      "selected": 0.0614,
+      "oracle": 0.0614,
+      "mean": 0.069416
+    },
+    {
+      "pair": 15,
+      "baseline": 0.0644,
+      "selected": 0.0632,
+      "oracle": 0.0558,
+      "mean": 0.06656000000000001
+    },
+    {
+      "pair": 19,
+      "baseline": 0.0572,
+      "selected": 0.0504,
+      "oracle": 0.0468,
+      "mean": 0.060343999999999995
+    },
+    {
+      "pair": 23,
+      "baseline": 0.0398,
+      "selected": 0.0344,
+      "oracle": 0.0292,
+      "mean": 0.041583999999999996
+    },
+    {
+      "pair": 27,
+      "baseline": 0.0906,
+      "selected": 0.0572,
+      "oracle": 0.0572,
+      "mean": 0.07788
+    },
+    {
+      "pair": 31,
+      "baseline": 0.4268,
+      "selected": 0.4268,
+      "oracle": 0.3832,
+      "mean": 0.408016
+    },
+    {
+      "pair": 34,
+      "baseline": 0.0888,
+      "selected": 0.0918,
+      "oracle": 0.0888,
+      "mean": 0.10479199999999998
+    },
+    {
+      "pair": 38,
+      "baseline": 0.0474,
+      "selected": 0.0422,
+      "oracle": 0.0422,
+      "mean": 0.052199999999999996
+    },
+    {
+      "pair": 42,
+      "baseline": 0.0406,
+      "selected": 0.0302,
+      "oracle": 0.0302,
+      "mean": 0.036944
+    },
+    {
+      "pair": 46,
+      "baseline": 0.058,
+      "selected": 0.0374,
+      "oracle": 0.0352,
+      "mean": 0.052360000000000004
+    },
+    {
+      "pair": 50,
+      "baseline": 0.412,
+      "selected": 0.4228,
+      "oracle": 0.398,
+      "mean": 0.41464
+    },
+    {
+      "pair": 54,
+      "baseline": 0.0744,
+      "selected": 0.082,
+      "oracle": 0.0692,
+      "mean": 0.089192
+    },
+    {
+      "pair": 57,
+      "baseline": 0.4018,
+      "selected": 0.4004,
+      "oracle": 0.3796,
+      "mean": 0.39593599999999995
+    },
+    {
+      "pair": 61,
+      "baseline": 0.4078,
+      "selected": 0.407,
+      "oracle": 0.3846,
+      "mean": 0.403192
+    },
+    {
+      "pair": 65,
+      "baseline": 0.4138,
+      "selected": 0.406,
+      "oracle": 0.3864,
+      "mean": 0.40616
+    },
+    {
+      "pair": 69,
+      "baseline": 0.0728,
+      "selected": 0.0658,
+      "oracle": 0.056,
+      "mean": 0.07434400000000001
+    },
+    {
+      "pair": 73,
+      "baseline": 0.3576,
+      "selected": 0.3984,
+      "oracle": 0.3512,
+      "mean": 0.37232000000000004
+    },
+    {
+      "pair": 77,
+      "baseline": 0.0628,
+      "selected": 0.0508,
+      "oracle": 0.0482,
+      "mean": 0.05650399999999999
+    },
+    {
+      "pair": 80,
+      "baseline": 0.0306,
+      "selected": 0.0368,
+      "oracle": 0.0244,
+      "mean": 0.032816
+    },
+    {
+      "pair": 84,
+      "baseline": 0.0516,
+      "selected": 0.0334,
+      "oracle": 0.0298,
+      "mean": 0.040824
+    },
+    {
+      "pair": 88,
+      "baseline": 0.4314,
+      "selected": 0.43,
+      "oracle": 0.4166,
+      "mean": 0.429744
+    },
+    {
+      "pair": 92,
+      "baseline": 0.0956,
+      "selected": 0.0884,
+      "oracle": 0.085,
+      "mean": 0.09455999999999999
+    },
+    {
+      "pair": 96,
+      "baseline": 0.0536,
+      "selected": 0.0374,
+      "oracle": 0.0346,
+      "mean": 0.05212000000000001
+    },
+    {
+      "pair": 100,
+      "baseline": 0.0444,
+      "selected": 0.0446,
+      "oracle": 0.04,
+      "mean": 0.048048
+    },
+    {
+      "pair": 103,
+      "baseline": 0.0514,
+      "selected": 0.0608,
+      "oracle": 0.0392,
+      "mean": 0.04907999999999999
+    },
+    {
+      "pair": 107,
+      "baseline": 0.4312,
+      "selected": 0.43,
+      "oracle": 0.4246,
+      "mean": 0.43392800000000004
+    },
+    {
+      "pair": 111,
+      "baseline": 0.112,
+      "selected": 0.092,
+      "oracle": 0.0874,
+      "mean": 0.099176
+    },
+    {
+      "pair": 115,
+      "baseline": 0.0438,
+      "selected": 0.028,
+      "oracle": 0.028,
+      "mean": 0.04693599999999999
+    },
+    {
+      "pair": 119,
+      "baseline": 0.0514,
+      "selected": 0.0386,
+      "oracle": 0.0306,
+      "mean": 0.041704
+    },
+    {
+      "pair": 123,
+      "baseline": 0.08,
+      "selected": 0.0802,
+      "oracle": 0.0748,
+      "mean": 0.086488
+    },
+    {
+      "pair": 126,
+      "baseline": 0.4032,
+      "selected": 0.4146,
+      "oracle": 0.384,
+      "mean": 0.406296
+    },
+    {
+      "pair": 130,
+      "baseline": 0.0874,
+      "selected": 0.0758,
+      "oracle": 0.0758,
+      "mean": 0.08653599999999999
+    },
+    {
+      "pair": 134,
+      "baseline": 0.4334,
+      "selected": 0.4206,
+      "oracle": 0.3952,
+      "mean": 0.42012
+    },
+    {
+      "pair": 138,
+      "baseline": 0.4002,
+      "selected": 0.4132,
+      "oracle": 0.3962,
+      "mean": 0.40931199999999995
+    },
+    {
+      "pair": 142,
+      "baseline": 0.4214,
+      "selected": 0.4162,
+      "oracle": 0.4016,
+      "mean": 0.422464
+    },
+    {
+      "pair": 145,
+      "baseline": 0.095,
+      "selected": 0.1058,
+      "oracle": 0.085,
+      "mean": 0.105232
+    },
+    {
+      "pair": 149,
+      "baseline": 0.3874,
+      "selected": 0.3766,
+      "oracle": 0.3516,
+      "mean": 0.371216
+    },
+    {
+      "pair": 153,
+      "baseline": 0.41,
+      "selected": 0.4012,
+      "oracle": 0.37,
+      "mean": 0.407688
+    },
+    {
+      "pair": 157,
+      "baseline": 0.4064,
+      "selected": 0.4256,
+      "oracle": 0.3796,
+      "mean": 0.405672
+    },
+    {
+      "pair": 161,
+      "baseline": 0.3874,
+      "selected": 0.3836,
+      "oracle": 0.3704,
+      "mean": 0.39330400000000004
+    },
+    {
+      "pair": 165,
+      "baseline": 0.3852,
+      "selected": 0.4056,
+      "oracle": 0.3578,
+      "mean": 0.385664
+    },
+    {
+      "pair": 168,
+      "baseline": 0.3908,
+      "selected": 0.3952,
+      "oracle": 0.3654,
+      "mean": 0.38400799999999996
+    },
+    {
+      "pair": 172,
+      "baseline": 0.0916,
+      "selected": 0.0526,
+      "oracle": 0.0498,
+      "mean": 0.08426399999999999
+    },
+    {
+      "pair": 176,
+      "baseline": 0.0458,
+      "selected": 0.0402,
+      "oracle": 0.0296,
+      "mean": 0.042
+    },
+    {
+      "pair": 180,
+      "baseline": 0.1014,
+      "selected": 0.0878,
+      "oracle": 0.087,
+      "mean": 0.09631999999999998
+    },
+    {
+      "pair": 184,
+      "baseline": 0.1076,
+      "selected": 0.0964,
+      "oracle": 0.0964,
+      "mean": 0.11148
+    },
+    {
+      "pair": 188,
+      "baseline": 0.3842,
+      "selected": 0.3996,
+      "oracle": 0.372,
+      "mean": 0.39331999999999995
+    },
+    {
+      "pair": 191,
+      "baseline": 0.0458,
+      "selected": 0.0482,
+      "oracle": 0.0398,
+      "mean": 0.0506
+    },
+    {
+      "pair": 195,
+      "baseline": 0.063,
+      "selected": 0.0518,
+      "oracle": 0.0424,
+      "mean": 0.05272
+    },
+    {
+      "pair": 199,
+      "baseline": 0.0582,
+      "selected": 0.0672,
+      "oracle": 0.0582,
+      "mean": 0.065832
+    },
+    {
+      "pair": 203,
+      "baseline": 0.0278,
+      "selected": 0.0398,
+      "oracle": 0.0272,
+      "mean": 0.039824
+    },
+    {
+      "pair": 207,
+      "baseline": 0.3992,
+      "selected": 0.4114,
+      "oracle": 0.3818,
+      "mean": 0.396072
+    },
+    {
+      "pair": 211,
+      "baseline": 0.0714,
+      "selected": 0.0514,
+      "oracle": 0.0416,
+      "mean": 0.060703999999999994
+    },
+    {
+      "pair": 214,
+      "baseline": 0.052,
+      "selected": 0.0526,
+      "oracle": 0.0392,
+      "mean": 0.056336000000000004
+    },
+    {
+      "pair": 218,
+      "baseline": 0.0892,
+      "selected": 0.054,
+      "oracle": 0.054,
+      "mean": 0.07659999999999999
+    },
+    {
+      "pair": 222,
+      "baseline": 0.0478,
+      "selected": 0.0462,
+      "oracle": 0.0416,
+      "mean": 0.05104
+    },
+    {
+      "pair": 226,
+      "baseline": 0.3998,
+      "selected": 0.4056,
+      "oracle": 0.35,
+      "mean": 0.3915040000000001
+    },
+    {
+      "pair": 230,
+      "baseline": 0.0512,
+      "selected": 0.049,
+      "oracle": 0.0462,
+      "mean": 0.05548
+    },
+    {
+      "pair": 234,
+      "baseline": 0.0542,
+      "selected": 0.052,
+      "oracle": 0.0506,
+      "mean": 0.056560000000000006
+    },
+    {
+      "pair": 237,
+      "baseline": 0.0664,
+      "selected": 0.0526,
+      "oracle": 0.0514,
+      "mean": 0.06372
+    },
+    {
+      "pair": 241,
+      "baseline": 0.0664,
+      "selected": 0.0526,
+      "oracle": 0.0504,
+      "mean": 0.05958400000000001
+    },
+    {
+      "pair": 245,
+      "baseline": 0.4142,
+      "selected": 0.4142,
+      "oracle": 0.404,
+      "mean": 0.421616
+    },
+    {
+      "pair": 249,
+      "baseline": 0.4144,
+      "selected": 0.4182,
+      "oracle": 0.4066,
+      "mean": 0.422112
+    },
+    {
+      "pair": 253,
+      "baseline": 0.4032,
+      "selected": 0.4124,
+      "oracle": 0.3916,
+      "mean": 0.40394399999999997
+    },
+    {
+      "pair": 256,
+      "baseline": 0.4324,
+      "selected": 0.4258,
+      "oracle": 0.4,
+      "mean": 0.42216000000000004
+    },
+    {
+      "pair": 260,
+      "baseline": 0.416,
+      "selected": 0.4104,
+      "oracle": 0.3898,
+      "mean": 0.40234400000000003
+    },
+    {
+      "pair": 264,
+      "baseline": 0.072,
+      "selected": 0.0456,
+      "oracle": 0.0456,
+      "mean": 0.06204
+    },
+    {
+      "pair": 268,
+      "baseline": 0.058,
+      "selected": 0.0564,
+      "oracle": 0.0508,
+      "mean": 0.061464
+    },
+    {
+      "pair": 272,
+      "baseline": 0.0538,
+      "selected": 0.0522,
+      "oracle": 0.0492,
+      "mean": 0.056280000000000004
+    },
+    {
+      "pair": 276,
+      "baseline": 0.0364,
+      "selected": 0.0394,
+      "oracle": 0.035,
+      "mean": 0.043256
+    },
+    {
+      "pair": 279,
+      "baseline": 0.4204,
+      "selected": 0.4082,
+      "oracle": 0.403,
+      "mean": 0.41468799999999995
+    },
+    {
+      "pair": 283,
+      "baseline": 0.4036,
+      "selected": 0.389,
+      "oracle": 0.3808,
+      "mean": 0.398136
+    },
+    {
+      "pair": 287,
+      "baseline": 0.4148,
+      "selected": 0.4222,
+      "oracle": 0.4004,
+      "mean": 0.42040799999999995
+    },
+    {
+      "pair": 291,
+      "baseline": 0.395,
+      "selected": 0.4148,
+      "oracle": 0.3812,
+      "mean": 0.407176
+    },
+    {
+      "pair": 295,
+      "baseline": 0.4084,
+      "selected": 0.4124,
+      "oracle": 0.396,
+      "mean": 0.41223999999999994
+    },
+    {
+      "pair": 299,
+      "baseline": 0.3934,
+      "selected": 0.3852,
+      "oracle": 0.3732,
+      "mean": 0.393048
+    },
+    {
+      "pair": 302,
+      "baseline": 0.0436,
+      "selected": 0.0498,
+      "oracle": 0.0408,
+      "mean": 0.05190399999999999
+    },
+    {
+      "pair": 306,
+      "baseline": 0.061,
+      "selected": 0.06,
+      "oracle": 0.0546,
+      "mean": 0.06340799999999999
+    },
+    {
+      "pair": 310,
+      "baseline": 0.0688,
+      "selected": 0.0464,
+      "oracle": 0.044,
+      "mean": 0.059376
+    },
+    {
+      "pair": 314,
+      "baseline": 0.0672,
+      "selected": 0.0606,
+      "oracle": 0.054,
+      "mean": 0.06112
+    },
+    {
+      "pair": 318,
+      "baseline": 0.0414,
+      "selected": 0.0414,
+      "oracle": 0.0414,
+      "mean": 0.054208
+    },
+    {
+      "pair": 322,
+      "baseline": 0.0412,
+      "selected": 0.0378,
+      "oracle": 0.034,
+      "mean": 0.0518
+    },
+    {
+      "pair": 325,
+      "baseline": 0.0888,
+      "selected": 0.074,
+      "oracle": 0.074,
+      "mean": 0.08503999999999999
+    },
+    {
+      "pair": 329,
+      "baseline": 0.0684,
+      "selected": 0.0684,
+      "oracle": 0.061,
+      "mean": 0.07586399999999999
+    },
+    {
+      "pair": 333,
+      "baseline": 0.089,
+      "selected": 0.0852,
+      "oracle": 0.075,
+      "mean": 0.08570399999999999
+    },
+    {
+      "pair": 337,
+      "baseline": 0.0792,
+      "selected": 0.0662,
+      "oracle": 0.0612,
+      "mean": 0.07837600000000002
+    },
+    {
+      "pair": 341,
+      "baseline": 0.0624,
+      "selected": 0.0402,
+      "oracle": 0.0402,
+      "mean": 0.061344
+    },
+    {
+      "pair": 345,
+      "baseline": 0.0774,
+      "selected": 0.068,
+      "oracle": 0.063,
+      "mean": 0.07815200000000001
+    },
+    {
+      "pair": 348,
+      "baseline": 0.387,
+      "selected": 0.3928,
+      "oracle": 0.3564,
+      "mean": 0.386192
+    },
+    {
+      "pair": 352,
+      "baseline": 0.4206,
+      "selected": 0.418,
+      "oracle": 0.3816,
+      "mean": 0.408136
+    },
+    {
+      "pair": 356,
+      "baseline": 0.3944,
+      "selected": 0.4034,
+      "oracle": 0.3782,
+      "mean": 0.39318400000000003
+    },
+    {
+      "pair": 360,
+      "baseline": 0.3938,
+      "selected": 0.378,
+      "oracle": 0.3752,
+      "mean": 0.38874400000000003
+    },
+    {
+      "pair": 364,
+      "baseline": 0.4116,
+      "selected": 0.4054,
+      "oracle": 0.3796,
+      "mean": 0.405504
+    },
+    {
+      "pair": 368,
+      "baseline": 0.4014,
+      "selected": 0.3876,
+      "oracle": 0.372,
+      "mean": 0.391256
+    },
+    {
+      "pair": 371,
+      "baseline": 0.049,
+      "selected": 0.056,
+      "oracle": 0.0472,
+      "mean": 0.054655999999999996
+    },
+    {
+      "pair": 375,
+      "baseline": 0.0566,
+      "selected": 0.0582,
+      "oracle": 0.0506,
+      "mean": 0.059151999999999996
+    },
+    {
+      "pair": 379,
+      "baseline": 0.3854,
+      "selected": 0.3828,
+      "oracle": 0.3674,
+      "mean": 0.381968
+    }
+  ]
+}

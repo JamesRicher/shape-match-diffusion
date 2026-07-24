@@ -1,0 +1,25 @@
+{
+  "name": "scape_diffusionnet_512_FMD",
+  "eval_tag": "scape_learned_feats_in_fm",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/scape_diffusionnet_512_FMD/models/final.pth",
+  "dataset": {
+    "name": "Scape_r",
+    "type": "SparsePairScapeDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "euclidean"
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.019088836386799812,
+  "auc": 0.8092286842105263,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.02597195655107498,
+  "sparse_acc": 0.8187191611842105,
+  "sparse_auc": 0.8929195844132111,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}

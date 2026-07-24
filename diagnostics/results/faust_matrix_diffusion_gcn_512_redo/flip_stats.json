@@ -1,0 +1,21 @@
+{
+  "name": "faust_matrix_diffusion_gcn_512_redo",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/faust_matrix_diffusion_gcn_512_redo/models/final.pth",
+  "n_pairs": 380,
+  "flip_thresh": 0.2,
+  "dense_voronoi": {
+    "mean": 0.13395339250564575,
+    "flip_rate": 0.1574457894736842,
+    "gross_gt_0.1": 0.19103578947368421
+  },
+  "dense_fm": {
+    "mean": 0.09050805866718292,
+    "flip_rate": 0.11030263157894737,
+    "gross_gt_0.1": 0.13313526315789473
+  },
+  "dense_gtlm": {
+    "mean": 0.012396934442222118,
+    "flip_rate": 0.0009431578947368421,
+    "gross_gt_0.1": 0.0015952631578947368
+  }
+}
