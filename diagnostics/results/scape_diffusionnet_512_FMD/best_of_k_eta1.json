@@ -1,0 +1,30 @@
+{
+  "name": "scape_diffusionnet_512_FMD",
+  "checkpoint": "experiments/faust_diffusionnet_512_FMD/models/final.pth",
+  "K": 5,
+  "n_pairs": 3,
+  "sample_eta": 1.0,
+  "feature_nn": {
+    "dense_MGE": 0.02471030503511429,
+    "median": 0.02358172833919525,
+    "gross_gt_0.1": 0.0
+  },
+  "single_sample": {
+    "dense_MGE": 0.02423214726150036,
+    "median": 0.02292151190340519,
+    "gross_gt_0.1": 0.0
+  },
+  "oracle_K": {
+    "dense_MGE": 0.02423214726150036,
+    "median": 0.02292151190340519,
+    "gross_gt_0.1": 0.0
+  },
+  "worst_K": {
+    "dense_MGE": 0.025996452197432518,
+    "median": 0.024717090651392937,
+    "gross_gt_0.1": 0.0
+  },
+  "oracle_gain_vs_single": 0.0,
+  "oracle_gain_vs_nn": 0.00047815777361392975,
+  "on_flipped_pairs": null
+}

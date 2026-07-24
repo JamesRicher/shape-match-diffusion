@@ -1,0 +1,50 @@
+{
+  "name": "scape_diffusionnet_512_FMD",
+  "checkpoint": "experiments/faust_diffusionnet_512_FMD/models/final.pth",
+  "K": 3,
+  "sample_eta": 0.0,
+  "n_pairs": 2,
+  "n_iso_pairs": 2000,
+  "single": {
+    "dense_MGE": 0.02490717265754938,
+    "gross_gt_0.1": 0.0,
+    "oracle_recovery": 0.0
+  },
+  "oracle": {
+    "dense_MGE": 0.02427665702998638,
+    "gross_gt_0.1": 0.0,
+    "oracle_recovery": 1.0
+  },
+  "selectors": {
+    "isometry": {
+      "dense_MGE": 0.024772497825324535,
+      "gross_gt_0.1": 0.0,
+      "oracle_recovery": 0.21359475695372748
+    },
+    "coverage": {
+      "dense_MGE": 0.02518154587596655,
+      "gross_gt_0.1": 0.0,
+      "oracle_recovery": -0.4351568881450966
+    },
+    "cycle": {
+      "dense_MGE": 0.02490717265754938,
+      "gross_gt_0.1": 0.0,
+      "oracle_recovery": 0.0
+    },
+    "combined": {
+      "dense_MGE": 0.024685705080628395,
+      "gross_gt_0.1": 0.0,
+      "oracle_recovery": 0.3512483549011759
+    }
+  },
+  "score_spearman_within_pair": {
+    "isometry": 0.25,
+    "coverage": -0.5,
+    "cycle": -0.25
+  },
+  "score_spearman_pooled": {
+    "isometry": -0.7142857142857143,
+    "coverage": 0.6571428571428573,
+    "cycle": 0.028571428571428574
+  }
+}
