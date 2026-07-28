@@ -1,7 +1,7 @@
 # DEBUG feature-extractor pretraining -- SCAPE_r. Replicates faust_gcn_4layer.yaml (the recipe
 # that produced the good FAUST extractor) EXACTLY; only the dataset differs.
-#   python pretrain_extractor.py -c debug/feature_extractor/configs/scape_gcn_4layer.yaml
-#   python evaluate_extractor.py  -c debug/feature_extractor/configs/scape_gcn_4layer.yaml
+#   python pretrain_extractor.py -c fe_configs/gcn/scape_gcn_4layer.yaml
+#   python evaluate_extractor.py  -c fe_configs/gcn/scape_gcn_4layer.yaml
 #
 # fps_metric is pinned to 'euclidean' -- the FAUST recipe left it unset and relied on the repo
 # default, which has since changed to 'geodesic'; the good FAUST pipeline used euclidean, so we

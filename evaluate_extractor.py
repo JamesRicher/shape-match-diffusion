@@ -6,7 +6,7 @@ plus a Polyscope view colouring the sparse points by their features.
     python evaluate_extractor.py --independent --no_vis   # honest (unpaired FPS) geodesic score
     python evaluate_extractor.py -c <cfg> --ckpt <path>   # explicit config / checkpoint
 
-Reads the same debug FE config as pretraining (debug/feature_extractor/configs/...); by
+Reads the same debug FE config as pretraining (fe_configs/...); by
 default it loads that run's best checkpoint. Matching is nearest-neighbour in the
 (L2-normalised) feature space. In the bijective setting a Y point j is correct iff
 argmax_i <f_y[j], f_x[i]> == j (exact accuracy + mean sparse geodesic error); --independent

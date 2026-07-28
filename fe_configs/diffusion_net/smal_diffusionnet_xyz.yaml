@@ -3,8 +3,8 @@
 # evaluate_extractor.py before spending the joint budget. Rationale: SMAL is cross-species
 # non-isometric, so intrinsic HKS is a weak descriptor; ULRSSM uses xyz for SMAL (and only for
 # SMAL / the partial benchmarks). xyz also breaks the left-right symmetry HKS cannot.
-#   python pretrain_diffusionnet.py -c debug/feature_extractor/configs/smal_diffusionnet_xyz.yaml --num_workers 8
-#   python evaluate_extractor.py    -c debug/feature_extractor/configs/smal_diffusionnet_xyz.yaml --dense --no_vis
+#   python pretrain_diffusionnet.py -c fe_configs/diffusion_net/smal_diffusionnet_xyz.yaml --num_workers 8
+#   python evaluate_extractor.py    -c fe_configs/diffusion_net/smal_diffusionnet_xyz.yaml --dense --no_vis
 
 name: smal_diffusionnet_xyz       # run dir = extractor_experiments/diffusion_net/<name>/
 

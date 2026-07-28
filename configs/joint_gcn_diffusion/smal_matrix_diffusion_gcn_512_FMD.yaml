@@ -1,7 +1,7 @@
 # Full GCN->diffusion->FM-densifier model on SMAL_r. Mirrors the good FAUST config
 # (faust_matrix_diffusion_gcn_512_FMD.yaml) exactly; only the dataset, the pretrained-extractor
 # path, and the (iteration-matched) epoch count differ. Pretrain the extractor FIRST:
-#   python pretrain_extractor.py -c debug/feature_extractor/configs/smal_gcn_4layer.yaml
+#   python pretrain_extractor.py -c fe_configs/gcn/smal_gcn_4layer.yaml
 # then:
 #   python train.py    -c configs/joint_gcn_diffusion/smal_matrix_diffusion_gcn_512_FMD.yaml
 #   python evaluate.py -c configs/joint_gcn_diffusion/smal_matrix_diffusion_gcn_512_FMD.yaml --num_qual 0

@@ -1,7 +1,7 @@
 # DEBUG feature-extractor pretraining -- SMAL_r. Replicates faust_gcn_4layer.yaml (the recipe
 # that produced the good FAUST extractor) EXACTLY; only the dataset differs.
-#   python pretrain_extractor.py -c debug/feature_extractor/configs/smal_gcn_4layer.yaml
-#   python evaluate_extractor.py  -c debug/feature_extractor/configs/smal_gcn_4layer.yaml
+#   python pretrain_extractor.py -c fe_configs/gcn/smal_gcn_4layer.yaml
+#   python evaluate_extractor.py  -c fe_configs/gcn/smal_gcn_4layer.yaml
 #
 # fps_metric pinned to 'euclidean' to reproduce the good FAUST regime (see scape_gcn_4layer.yaml).
 # category: true = canonical SMAL_r species-held-out split (the ULRSSM protocol / published

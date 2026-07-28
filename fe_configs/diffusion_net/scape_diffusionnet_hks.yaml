@@ -1,7 +1,7 @@
 # DEBUG DiffusionNet pretraining on SCAPE_r with INTRINSIC (HKS) input.
 # Mirror of faust_diffusionnet_hks.yaml; only the dataset changes.
-#   python pretrain_diffusionnet.py -c debug/feature_extractor/configs/scape_diffusionnet_hks.yaml --num_workers 8
-#   python evaluate_extractor.py    -c debug/feature_extractor/configs/scape_diffusionnet_hks.yaml --dense --no_vis
+#   python pretrain_diffusionnet.py -c fe_configs/diffusion_net/scape_diffusionnet_hks.yaml --num_workers 8
+#   python evaluate_extractor.py    -c fe_configs/diffusion_net/scape_diffusionnet_hks.yaml --dense --no_vis
 
 name: scape_diffusionnet_hks      # run dir = extractor_experiments/diffusion_net/<name>/
 # device: cuda            # optional; auto-detected when omitted

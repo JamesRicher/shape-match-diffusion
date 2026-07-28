@@ -12,10 +12,10 @@ than after an 8-hour run.
      for a few hundred steps. Train accuracy must climb toward ~1. If the extractor cannot
      overfit a handful of pairs, the implementation is broken -- no point pretraining.
 
-    python debug/feature_extractor/sanity_extractor.py -c debug/feature_extractor/configs/faust_diffusionnet.yaml
+    python -m diagnostics.sanity_extractor -c fe_configs/diffusion_net/faust_diffusionnet.yaml
     ... --n_pairs 4 --steps 300 --pass_acc 0.9 --device cuda
 
-Lives under debug/ and imports only shared helpers; delete-safe.
+Imports only shared helpers; delete-safe.
 """
 import argparse
 import os
@@ -25,12 +25,11 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from datasets import build_dataset          # noqa: E402
-from metrics.geo_metric import calculate_geodesic_error  # noqa: E402
-from networks import build_network          # noqa: E402
-from pretrain_extractor import contrastive_loss  # noqa: E402
-from utils.options import load_yaml         # noqa: E402
+from datasets import build_dataset
+from metrics.geo_metric import calculate_geodesic_error
+from networks import build_network
+from pretrain_extractor import contrastive_loss
+from utils.options import load_yaml
 
 
 def _extract(ext, shape):

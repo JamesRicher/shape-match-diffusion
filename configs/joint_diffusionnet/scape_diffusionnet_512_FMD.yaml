@@ -1,7 +1,7 @@
 # SCAPE_r joint model: DiffusionNet extractor (warm-started from HKS pretrain) + FM densifier.
 # Mirrors faust_diffusionnet_512_FMD.yaml; only the dataset, extractor checkpoint, and epoch
 # count differ. Pretrain the extractor FIRST:
-#   python pretrain_diffusionnet.py -c debug/feature_extractor/configs/scape_diffusionnet_hks.yaml --num_workers 8
+#   python pretrain_diffusionnet.py -c fe_configs/diffusion_net/scape_diffusionnet_hks.yaml --num_workers 8
 #   python run_experiment.py -c configs/joint_diffusionnet/scape_diffusionnet_512_FMD.yaml --num_qual 0 --num_workers 8
 name: scape_diffusionnet_512_FMD
 group: diffusionnet                 # experiments/<group>/<name>/

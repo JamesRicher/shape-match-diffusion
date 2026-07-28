@@ -1,7 +1,7 @@
 """Standalone contrastive pretraining of the GCN feature extractor (no diffusion).
 
-Config-driven and self-contained under debug/feature_extractor/ -- kept separate from the
-real configs/ and experiments/. A run reads a debug config (network + datasets + train opts)
+Config-driven from fe_configs/ -- kept separate from the
+real configs/ and experiments/. A run reads an FE config (network + datasets + train opts)
 and writes its checkpoints/logs to extractor_experiments/<kind>/<name>/.
 
 Trains GCNFeatureExtractor on FAUST_r sparse pairs so matched points get aligned features:
@@ -9,7 +9,7 @@ the sparse GT is the identity permutation over FPS points (point i of X <-> poin
 we take a symmetric InfoNCE over the (n, n) feature similarity matrix with target arange(n).
 
     python pretrain_extractor.py                                            # default debug config
-    python pretrain_extractor.py -c debug/feature_extractor/configs/faust_gcn.yaml
+    python pretrain_extractor.py -c fe_configs/gcn/faust_gcn_4layer.yaml
     python pretrain_extractor.py --name faust_gcn_anchor --epochs 80        # CLI overrides
 """
 import os
@@ -28,7 +28,7 @@ from datasets import build_dataset
 from networks import build_network
 from networks.gcn_feature_extractor import build_patches
 
-# Configs still live under debug/feature_extractor/configs/; run OUTPUTS (checkpoints + logs)
+# Configs still live under fe_configs/; run OUTPUTS (checkpoints + logs)
 # now live under extractor_experiments/<kind>/<name>/, grouped by extractor family.
 # Anchored to this file's directory so paths hold regardless of the caller's cwd.
 ROOT = os.path.dirname(os.path.abspath(__file__))

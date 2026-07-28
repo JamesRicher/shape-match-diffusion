@@ -2,7 +2,7 @@
 # Mirrors faust_diffusionnet_512_FMD.yaml; dataset uses the category (species-held-out) split.
 # NOTE: SMAL is strongly NON-ISOMETRIC (cross-species) -- HKS may be a weak input here; consider
 # an xyz (or xyz+hks) extractor ablation. Pretrain the extractor FIRST:
-#   python pretrain_diffusionnet.py -c debug/feature_extractor/configs/smal_diffusionnet_hks.yaml --num_workers 8
+#   python pretrain_diffusionnet.py -c fe_configs/diffusion_net/smal_diffusionnet_hks.yaml --num_workers 8
 #   python run_experiment.py -c configs/joint_diffusionnet/smal_diffusionnet_512_FMD.yaml --num_qual 0 --num_workers 8
 name: smal_diffusionnet_512_FMD
 group: diffusionnet                 # experiments/<group>/<name>/

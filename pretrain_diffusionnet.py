@@ -9,7 +9,7 @@ indices rather than patchifying. The sparse GT is the identity permutation over 
 
 Config needs the datasets to set ret_evecs: true (num_evecs >= network.k_eig).
 
-    python pretrain_diffusionnet.py -c debug/feature_extractor/configs/faust_diffusionnet.yaml
+    python pretrain_diffusionnet.py -c fe_configs/diffusion_net/faust_diffusionnet.yaml
     python pretrain_diffusionnet.py --name faust_dfn_hks --epochs 80        # CLI overrides
 
 Outputs land under extractor_experiments/<kind>/<name>/ (models/best.pth, final.pth; logs).
