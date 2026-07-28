@@ -1,0 +1,61 @@
+{
+  "name": "scape_diffusionnet_512_FMD",
+  "checkpoint": "experiments/faust_diffusionnet_512_FMD/models/final.pth",
+  "K": 100,
+  "sample_eta": 0.25,
+  "split": "test",
+  "n_pairs": 380,
+  "n_iso_pairs": 2000,
+  "feature_nn": {
+    "dense_MGE": 0.0578387975692749,
+    "gross_gt_0.1": 0.1868421052631579,
+    "oracle_recovery": 0.030106506842679272
+  },
+  "single": {
+    "dense_MGE": 0.05837250259263735,
+    "gross_gt_0.1": 0.20789473684210527,
+    "oracle_recovery": 0.0
+  },
+  "oracle": {
+    "dense_MGE": 0.04064527086325382,
+    "gross_gt_0.1": 0.0868421052631579,
+    "oracle_recovery": 1.0
+  },
+  "selectors": {
+    "isometry": {
+      "dense_MGE": 0.04927694671542237,
+      "gross_gt_0.1": 0.11842105263157894,
+      "oracle_recovery": 0.5130838258372156
+    },
+    "coverage": {
+      "dense_MGE": 0.05049974444371305,
+      "gross_gt_0.1": 0.13157894736842105,
+      "oracle_recovery": 0.44410533291979903
+    },
+    "cycle": {
+      "dense_MGE": 0.05774261226975604,
+      "gross_gt_0.1": 0.19210526315789472,
+      "oracle_recovery": 0.03553235679980648
+    },
+    "iso+cov": {
+      "dense_MGE": 0.049732157347821875,
+      "gross_gt_0.1": 0.12631578947368421,
+      "oracle_recovery": 0.487405217955931
+    },
+    "combined": {
+      "dense_MGE": 0.05009999506077484,
+      "gross_gt_0.1": 0.11842105263157894,
+      "oracle_recovery": 0.4666553502626431
+    }
+  },
+  "score_spearman_within_pair": {
+    "isometry": 0.2392865239081608,
+    "coverage": 0.2776911355109554,
+    "cycle": 0.015137600817013357
+  },
+  "score_spearman_pooled": {
+    "isometry": 0.46471428227499184,
+    "coverage": 0.8489246919272545,
+    "cycle": 0.585444491315969
+  }
+}
