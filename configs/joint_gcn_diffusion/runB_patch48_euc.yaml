@@ -5,6 +5,7 @@
 #   ~0.016 -> euclidean training rescues the small patch (FPS is the cause)
 #   ~0.09  -> small patch is bad regardless of FPS (extractor is the cause)
 name: runB_patch48_euc
+group: pre_diffusionnet                 # experiments/<group>/<name>/
 model_type: MatrixDiffusionModel
 is_train: true
 

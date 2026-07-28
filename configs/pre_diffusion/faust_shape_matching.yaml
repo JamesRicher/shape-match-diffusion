@@ -2,6 +2,7 @@
 # Run with:  python train.py -c configs/faust_shape_matching.yaml
 
 name: faust_frozen         # experiment dir under experiments/<name>/
+group: pre_diffusionnet                 # experiments/<group>/<name>/
 model_type: ShapeMatchingModel
 is_train: true
 # device: cuda                # optional; auto-detected (cuda if available) when omitted

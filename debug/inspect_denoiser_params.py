@@ -6,7 +6,7 @@ geodesic gammas (softplus of raw_gamma, per layer x head) and the inter
 cross-attention log-P_t gammas (raw, zero-init).
 
 Usage:
-    python debug/inspect_denoiser_params.py experiments/faust_matrix_diffusion_v2/models/final.pth
+    python debug/inspect_denoiser_params.py experiments/pre_diffusionnet/faust_matrix_diffusion_v2/models/final.pth
     python debug/inspect_denoiser_params.py <ckpt> --no-inventory   # bias tables only
 """
 import argparse

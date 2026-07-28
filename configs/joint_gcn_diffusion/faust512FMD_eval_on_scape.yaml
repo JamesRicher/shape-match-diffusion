@@ -1,12 +1,13 @@
 # Cross-dataset evaluation: the FAUST-trained 512-FMD model evaluated on SCAPE_r.
 # `name` points evaluate.py at the FAUST experiment's checkpoint
-# (experiments/faust_matrix_diffusion_gcn_512_FMD/models/final.pth); datasets.test is
+# (experiments/pre_diffusionnet/faust_matrix_diffusion_gcn_512_FMD/models/final.pth); datasets.test is
 # SCAPE_r, so this measures FAUST->SCAPE generalisation. Architecture is copied verbatim
 # from faust_matrix_diffusion_gcn_512_FMD.yaml (identical to the SCAPE config), which it
 # must be for the checkpoint to load. Eval only reads datasets.test.
 #   python evaluate.py -c configs/joint_gcn_diffusion/faust512FMD_eval_on_scape.yaml --num_qual 0
-# Results land in experiments/faust_matrix_diffusion_gcn_512_FMD/results/Scape_r/.
+# Results land in experiments/pre_diffusionnet/faust_matrix_diffusion_gcn_512_FMD/results/Scape_r/.
 name: faust_matrix_diffusion_gcn_512_FMD
+group: pre_diffusionnet                 # experiments/<group>/<name>/
 model_type: MatrixDiffusionModel
 is_train: true
 

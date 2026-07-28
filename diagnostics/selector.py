@@ -18,7 +18,7 @@ validation -- not a guess -- says which score(s) to keep.
 USAGE (the decisive cross-dataset run, FAUST model on SCAPE data):
   python -m diagnostics.selector \
       -c configs/joint_diffusionnet/scape_diffusionnet_512_FMD.yaml \
-      --checkpoint experiments/faust_diffusionnet_512_FMD/models/final.pth \
+      --checkpoint experiments/diffusionnet/faust_diffusionnet_512_FMD/models/final.pth \
       -K 16 --num-pairs 100 --eta 0.5
 
 Optional: --num-pairs N (0=all), --eta (DDIM->DDPM stochasticity), --n-iso-pairs, --seed, --device.

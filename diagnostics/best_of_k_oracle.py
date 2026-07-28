@@ -20,7 +20,7 @@ noise; --eta is a placeholder for a future stochastic sampler and is ignored her
 USAGE (the decisive cross-dataset run, FAUST model on SCAPE data):
   python -m diagnostics.best_of_k_oracle \
       -c configs/joint_diffusionnet/scape_diffusionnet_512_FMD.yaml \
-      --checkpoint experiments/faust_diffusionnet_512_FMD/models/final.pth \
+      --checkpoint experiments/diffusionnet/faust_diffusionnet_512_FMD/models/final.pth \
       -K 8 --num-pairs 60
 
 Optional: --num-pairs N (0 = all; cap it, densify is K x slower), --seed, --device.

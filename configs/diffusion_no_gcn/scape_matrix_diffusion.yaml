@@ -7,6 +7,7 @@
 #    texture-transfer needs densification, which is deferred — steps.md Step 3.)
 
 name: scape_matrix_diffusion   # experiment dir under experiments/<name>/
+group: pre_diffusionnet                 # experiments/<group>/<name>/
 model_type: MatrixDiffusionModel
 is_train: true
 # device: cuda                 # optional; auto-detected (cuda if available) when omitted

@@ -33,10 +33,15 @@ def load_yaml(path):
 
 def resolve_experiment_paths(opt, resume=None):
     """Populate ``opt['path']`` with the standard experiment layout under
-    ``experiments/<name>/``, without clobbering anything already set.
+    ``experiments/<group>/<name>/``, without clobbering anything already set.
+
+    ``group`` is the top-level config key that keeps experiments/ sorted by model line
+    (``diffusionnet`` for the DiffusionNet-extractor configs, ``pre_diffusionnet`` for
+    everything before it). Omit it and the run lands flat in ``experiments/<name>/`` as
+    before, so older configs keep working.
 
     Layout:
-        experiments/<name>/   experiment_info.json (config + network stats)
+        experiments/<group>/<name>/   experiment_info.json (config + network stats)
         models/               checkpoints (``latest.pth`` = resumable, ``final.pth`` = final-epoch)
         results/              training artifacts (metrics.csv, curves)
         results/<tag>/        one test evaluation (stats.json, pck.png/pck.npy, qual/);
@@ -46,7 +51,7 @@ def resolve_experiment_paths(opt, resume=None):
     Shared by ``train.py`` and ``evaluate.py`` so both agree on where things live.
     ``resume`` (if given) sets ``path['resume_state']`` (checkpoint to load).
     """
-    exp_dir = osp.join(EXPERIMENTS_ROOT, opt['name'])
+    exp_dir = osp.join(EXPERIMENTS_ROOT, opt.get('group', ''), opt['name'])
     path = opt.setdefault('path', {})
     path.setdefault('experiment_root', exp_dir)
     path.setdefault('models', osp.join(exp_dir, 'models'))

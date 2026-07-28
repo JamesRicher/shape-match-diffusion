@@ -33,7 +33,7 @@ Outputs (to --out-dir, default experiments/<name>/results/variety/):
 Examples:
   python -m vis.sample_variety -c configs/faust_matrix_diffusion.yaml --samples 16 --num-pairs 30
   python -m vis.sample_variety -c configs/smal_matrix_diffusion.yaml \
-      --checkpoint experiments/smal_matrix_diffusion/models/latest.pth --samples 8
+      --checkpoint experiments/pre_diffusionnet/smal_matrix_diffusion/models/latest.pth --samples 8
 """
 import argparse
 import json

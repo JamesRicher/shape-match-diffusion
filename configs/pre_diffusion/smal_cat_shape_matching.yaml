@@ -7,6 +7,7 @@
 # split used by shape_matching_smal.
 
 name: shape_matching_smal_cat  # experiment dir under experiments/<name>/
+group: pre_diffusionnet                 # experiments/<group>/<name>/
 model_type: ShapeMatchingModel
 is_train: true
 # device: cuda                # optional; auto-detected (cuda if available) when omitted

@@ -1,4 +1,5 @@
 name: faust_matrix_diffusion_v2 
+group: pre_diffusionnet                 # experiments/<group>/<name>/
 model_type: MatrixDiffusionModel
 is_train: true
 # device: cuda                 # optional; auto-detected (cuda if available) when omitted

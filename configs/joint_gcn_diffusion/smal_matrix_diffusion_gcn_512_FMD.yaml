@@ -6,6 +6,7 @@
 #   python train.py    -c configs/joint_gcn_diffusion/smal_matrix_diffusion_gcn_512_FMD.yaml
 #   python evaluate.py -c configs/joint_gcn_diffusion/smal_matrix_diffusion_gcn_512_FMD.yaml --num_qual 0
 name: smal_matrix_diffusion_gcn_512_FMD
+group: pre_diffusionnet                 # experiments/<group>/<name>/
 model_type: MatrixDiffusionModel
 is_train: true
 

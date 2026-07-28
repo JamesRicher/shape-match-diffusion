@@ -4,6 +4,7 @@
 #   python pretrain_diffusionnet.py -c debug/feature_extractor/configs/scape_diffusionnet_hks.yaml --num_workers 8
 #   python run_experiment.py -c configs/joint_diffusionnet/scape_diffusionnet_512_FMD.yaml --num_qual 0 --num_workers 8
 name: scape_diffusionnet_512_FMD
+group: diffusionnet                 # experiments/<group>/<name>/
 model_type: MatrixDiffusionModel
 is_train: true
 

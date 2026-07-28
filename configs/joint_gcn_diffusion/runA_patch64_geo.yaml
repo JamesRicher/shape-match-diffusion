@@ -5,6 +5,7 @@
 #   ~0.09  -> training FPS is the cause (extractor exonerated)
 #   ~0.016 -> geodesic training is fine (extractor is the cause)
 name: runA_patch64_geo
+group: pre_diffusionnet                 # experiments/<group>/<name>/
 model_type: MatrixDiffusionModel
 is_train: true
 

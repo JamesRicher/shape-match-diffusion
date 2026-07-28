@@ -2,6 +2,7 @@
 # - different feature extractor, also fixed geodesic FPS since last run
 
 name: faust_matrix_diffusion_gcn_512_redo
+group: pre_diffusionnet                 # experiments/<group>/<name>/
 model_type: MatrixDiffusionModel
 is_train: true
 

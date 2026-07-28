@@ -7,6 +7,7 @@
 # Extractor arch MUST match the pretrain config exactly (hks, hidden 128, n_block 4, k_eig 128).
 # For a COLD-START ablation instead: drop the `path:` block and set both LRs to 1e-3.
 name: faust_diffusionnet_512_FMD
+group: diffusionnet                 # experiments/<group>/<name>/
 model_type: MatrixDiffusionModel
 is_train: true
 

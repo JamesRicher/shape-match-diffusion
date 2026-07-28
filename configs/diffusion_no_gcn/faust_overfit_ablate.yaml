@@ -11,6 +11,7 @@
 # See the overfit-gate-feature-shortcut memory.
 
 name: faust_diffusion_overfit_ablate
+group: pre_diffusionnet                 # experiments/<group>/<name>/
 model_type: MatrixDiffusionModel
 is_train: true
 

@@ -1,4 +1,5 @@
 name: faust_matrix_diffusion_gcn_1024
+group: pre_diffusionnet                 # experiments/<group>/<name>/
 model_type: MatrixDiffusionModel
 is_train: true
 

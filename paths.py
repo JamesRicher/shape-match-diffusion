@@ -39,4 +39,4 @@ DEFAULT_DATA_ROOTS = {
 }
 
 EXPERIMENTS_ROOT      = osp.join(REPO_ROOT, "experiments")
-FROZEN_BASELINES_ROOT = osp.join(EXPERIMENTS_ROOT, "frozen_feature_baselines")
+FROZEN_BASELINES_ROOT = osp.join(EXPERIMENTS_ROOT, "pre_diffusionnet", "frozen_feature_baselines")
