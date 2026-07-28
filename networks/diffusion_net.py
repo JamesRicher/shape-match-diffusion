@@ -15,6 +15,8 @@ nmwsharp/diffusion-net), specialised to this codebase:
 model calls `extract(shape_dict, idx)` (operators live in the shape dict) instead of the GCN
 extractor's `extract(verts, dist, idx)`. Non-learned operators, so no separate cache is built.
 """
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -142,6 +144,25 @@ class DiffusionNetCore(nn.Module):
 # --------------------------------------------------------------------------- #
 # extractor (registered)
 # --------------------------------------------------------------------------- #
+def _random_rotation(deg_xyz, device, dtype):
+    """Random rotation matrix, each axis drawn uniformly from [-deg, +deg] (degrees).
+
+    Follows ULRSSM's get_random_rotation / euler_angles_to_rotation_matrix: per-axis Euler
+    angles composed R_z @ R_y @ R_x. Its default (0, 90, 0) is yaw only, which is the axis
+    SMAL_r actually varies along.
+    """
+    t = [(torch.rand((), device=device, dtype=dtype) * 2 - 1) * (float(d) * math.pi / 180.0)
+         for d in deg_xyz]
+    one, zero = torch.ones((), device=device, dtype=dtype), torch.zeros((), device=device, dtype=dtype)
+    cx, sx, cy, sy, cz, sz = (torch.cos(t[0]), torch.sin(t[0]), torch.cos(t[1]),
+                              torch.sin(t[1]), torch.cos(t[2]), torch.sin(t[2]))
+    stack = lambda rows: torch.stack([torch.stack(r) for r in rows])
+    R_x = stack([[one, zero, zero], [zero, cx, -sx], [zero, sx, cx]])
+    R_y = stack([[cy, zero, sy], [zero, one, zero], [-sy, zero, cy]])
+    R_z = stack([[cz, -sz, zero], [sz, cz, zero], [zero, zero, one]])
+    return R_z @ R_y @ R_x
+
+
 @NETWORK_REGISTRY.register()
 class DiffusionNetExtractor(nn.Module):
     """Per-vertex DiffusionNet descriptor, sampled at the FPS points.
@@ -156,17 +177,34 @@ class DiffusionNetExtractor(nn.Module):
         hidden: DiffusionNet width. n_block: number of diffusion blocks.
         k_eig: LBO eigenpairs used for spectral diffusion (<= dataset num_evecs).
         hks_count: number of HKS bands when input_type == 'hks'.
+        rot_aug: per-axis (x, y, z) degrees of random rotation applied to xyz input during
+            TRAINING only, each drawn uniformly from [-deg, +deg]; (0, 0, 0) disables it.
+            Use [0, 90, 0] to match ULRSSM, whose SMAL model relies on it: xyz is extrinsic,
+            so without augmentation the network keys on a per-shape frame that is arbitrary
+            (SMAL_r shapes differ by ~108 degrees of median yaw). Ignored for hks, which is
+            intrinsic and already rotation-invariant.
+
+            Rotation ONLY -- deliberately not ULRSSM's accompanying noise and rescaling. The
+            spectral operators (mass, evals, evecs, gradX, gradY) are cached per mesh and are
+            rotation-invariant, so rotating the input stays exactly consistent with them;
+            jittering or rescaling the vertices would not.
         dropout / with_gradient_features / with_gradient_rotations: DiffusionNet options.
     """
     needs_operators = True   # tells the model to call extract(shape_dict, idx)
 
     def __init__(self, out_dim=128, input_type='xyz', hidden=128, n_block=4, k_eig=128,
-                 hks_count=16, dropout=False, with_gradient_features=True,
-                 with_gradient_rotations=True):
+                 hks_count=16, rot_aug=(0.0, 0.0, 0.0), dropout=False,
+                 with_gradient_features=True, with_gradient_rotations=True):
         super().__init__()
         if input_type not in ('xyz', 'hks'):
             raise ValueError(f"input_type must be 'xyz' or 'hks', got {input_type!r}")
         self.input_type = input_type
+        rot_aug = (rot_aug,) * 3 if isinstance(rot_aug, (int, float)) else tuple(rot_aug)
+        if len(rot_aug) != 3:
+            raise ValueError(f'rot_aug must be a scalar or 3 per-axis degrees, got {rot_aug!r}')
+        if any(rot_aug) and input_type != 'xyz':
+            raise ValueError(f"rot_aug is only meaningful for input_type 'xyz', got {input_type!r}")
+        self.rot_aug = rot_aug
         self.k_eig = k_eig
         self.hks_count = hks_count
         in_channels = 3 if input_type == 'xyz' else hks_count
@@ -191,6 +229,8 @@ class DiffusionNetExtractor(nn.Module):
 
         if self.input_type == 'xyz':
             x = shape['verts'].to(dev).float()                       # [V, 3]
+            if self.training and any(self.rot_aug):                  # independent draw per shape
+                x = x @ _random_rotation(self.rot_aug, dev, x.dtype).T
         else:
             x = compute_hks_autoscale(evals, evecs, self.hks_count)  # [V, hks_count]
         return self.net(x, mass, evals, evecs, gradX, gradY)         # [V, out_dim]

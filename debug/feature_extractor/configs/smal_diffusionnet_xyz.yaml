@@ -1,0 +1,37 @@
+# DEBUG DiffusionNet pretraining on SMAL_r with EXTRINSIC (xyz) input + yaw augmentation.
+# The xyz counterpart of smal_diffusionnet_hks.yaml -- run both and compare with
+# evaluate_extractor.py before spending the joint budget. Rationale: SMAL is cross-species
+# non-isometric, so intrinsic HKS is a weak descriptor; ULRSSM uses xyz for SMAL (and only for
+# SMAL / the partial benchmarks). xyz also breaks the left-right symmetry HKS cannot.
+#   python pretrain_diffusionnet.py -c debug/feature_extractor/configs/smal_diffusionnet_xyz.yaml --num_workers 8
+#   python evaluate_extractor.py    -c debug/feature_extractor/configs/smal_diffusionnet_xyz.yaml --dense --no_vis
+
+name: smal_diffusionnet_xyz       # run dir = extractor_experiments/diffusion_net/<name>/
+
+datasets:
+  # ret_evecs: true REQUIRED (num_evecs >= network.k_eig). category: true = canonical species-held-out
+  # split (ULRSSM protocol); euclidean FPS matches the good regime (and is rotation-invariant).
+  train: {name: Smal_r, type: SparsePairSmalDataset, phase: train, n_sparse: 256, category: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  val:   {name: Smal_r, type: SparsePairSmalDataset, phase: test,  n_sparse: 256, exclude_self: true, category: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+
+network:
+  type: DiffusionNetExtractor
+  out_dim: 128
+  input_type: xyz         # extrinsic coordinates: symmetry-breaking, but frame-dependent
+  # SMAL_r meshes are centred but differ by arbitrary HEADING (measured: rotation between shapes
+  # is 91% dominated by the y axis, median 108 deg). Without this the network keys on a per-shape
+  # frame that carries no correspondence information. 180 = uniform over the full circle, so
+  # absolute yaw becomes uninformative; x and z stay 0 because shapes are consistently upright
+  # and the height cue (spine up, legs down) is real signal worth keeping.
+  rot_aug: [0, 180, 0]    # train-time only, independent draw per shape; rotation only, no jitter/rescale
+  hidden: 128
+  n_block: 4
+  k_eig: 128              # <= datasets.*.num_evecs
+
+train:
+  epochs: 50
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  tau: 0.07               # InfoNCE temperature
+  num_workers: 4          # pin_memory off (collate ships sparse gradX/gradY)
+  eval_limit: 40          # val pairs scored each epoch (null = all)
