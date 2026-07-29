@@ -1,7 +1,9 @@
-"""ISOLATED, DELETE-SAFE DIAGNOSTIC -- does the diffusion do anything beyond feature-NN?
+"""DIAGNOSTIC -- does the diffusion do anything beyond feature-NN?
 
-Everything this needs lives under diagnostics/; every output goes to diagnostics/results/.
-It modifies no tracked file and registers nothing. Delete diagnostics/ to remove it entirely.
+Results land in the benchmarked model's OWN experiment dir, under
+results/benchmarks/<eval_config_name>/ (see _benchmark_dir): a model is identified by its
+checkpoint, and the leaf is keyed by the eval config so in-distribution and cross-dataset runs
+sit side by side without clobbering.
 
 WHAT IT ANSWERS
 ---------------
@@ -59,8 +61,19 @@ from models.base_model import to_numpy
 from train import autofill_feat_dim
 from utils.options import load_yaml, resolve_experiment_paths
 
-_OUT_ROOT = os.path.join(os.path.dirname(__file__), 'results')
 calculate_geodesic_error = build_metric({"type": "calculate_geodesic_error"})
+
+
+def _benchmark_dir(ckpt, eval_name):
+    """Where this benchmark's artifacts land: inside the BENCHMARKED MODEL's own experiment
+    dir, under results/benchmarks/<eval_name>/. The model is identified by its checkpoint
+    (``<experiment_root>/models/final.pth``), so experiment_root is two levels up -- this stays
+    correct for cross-dataset runs, where the model (checkpoint) and the eval set (config)
+    differ. Keying the leaf by the eval config keeps in-distribution and cross results side by
+    side without clobbering (e.g. a FAUST model gets .../benchmarks/faust... and
+    .../benchmarks/scape... for its cross run)."""
+    experiment_root = os.path.dirname(os.path.dirname(os.path.abspath(ckpt)))
+    return os.path.join(experiment_root, 'results', 'benchmarks', eval_name)
 
 
 def _build(config_path, checkpoint, device, fps_metric, split='test', exclude_self=False):
@@ -178,12 +191,13 @@ def run(config_path, checkpoint, device, fps_metric, num_pairs, seed, with_diffu
         if 'hungarian' in err:                                      # the control: is the win just bijectivity?
             summary['delta_MGE_hungarian_minus_diffusion'] = summary['hungarian']['dense_MGE'] - summary['diffusion']['dense_MGE']
 
-    out_dir = os.path.join(_OUT_ROOT, name)
+    out_dir = _benchmark_dir(ckpt, name)
     os.makedirs(out_dir, exist_ok=True)
     np.savez(os.path.join(out_dir, 'nn_baseline_dense.npz'),
              nn_error=err['nn'],
              hungarian_error=err.get('hungarian', np.array([])),
              diffusion_error=err.get('diffusion', np.array([])))
+    summary['out_dir'] = out_dir
     with open(os.path.join(out_dir, 'nn_baseline_dense.json'), 'w') as f:
         json.dump(summary, f, indent=2)
     return summary
@@ -228,7 +242,7 @@ def main():
     s = run(args.config, args.checkpoint, args.device, args.fps_metric,
             args.num_pairs, args.seed, not args.no_diffusion, not args.no_hungarian)
     _print(s)
-    print(f"\nper-pair errors + JSON under: {os.path.join(_OUT_ROOT, s['name'])}/")
+    print(f"\nper-pair errors + JSON under: {s['out_dir']}/")
 
 
 if __name__ == '__main__':
