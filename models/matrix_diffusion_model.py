@@ -35,6 +35,7 @@ class MatrixDiffusionModel(BaseModel):
         self.eta = cfg.get('eta', 0.1)                  # logit_target label-smoothing
         self.proj_iters = cfg.get('proj_iters', 5)      # Π_S Sinkhorn iterations
         self.schedule_s = cfg.get('schedule_s', 0.008)  # cosine ᾱ offset
+        self.logsnr_shift = cfg.get('logsnr_shift', 0.0) # uniform log-SNR shift (nats); 0 = plain cosine
         self.sample_steps = cfg.get('sample_steps', 50) # reverse steps at inference
         self.final_iters = cfg.get('final_iters', 20)   # Sinkhorn iters for the final DS snap
         # zero the per-point features so the ONLY cross-shape signal is P_t (the alpha*log P_t
@@ -42,6 +43,13 @@ class MatrixDiffusionModel(BaseModel):
         # P_t pathway: with features present the bilinear readout solves the match from features
         # alone and loss_vs_t is flat at every t (see overfit-gate-feature-shortcut memory).
         self.ablate_features = cfg.get('ablate_features', False)
+        # CFG-style conditioning dropout (Ho & Salimans 2022): each TRAIN step, with this
+        # probability, zero the whole feature block so the denoiser must denoise from P_t +
+        # geodesics alone. Forces a feature-free mode -> the P_t pathway becomes self-sufficient
+        # (so the reschedule's work-band gets used, not bypassed by the feature one-shot) and, if
+        # wanted later, enables classifier-free guidance at sampling. Eval/diagnostics (is_train
+        # False after eval()) never drop. See reverse-trajectory-inert / loss-vs-t memories.
+        self.feature_dropout = cfg.get('feature_dropout', 0.0)
 
         # optional map densifier (sparse p2p -> dense whole-shape p2p). A non-learned
         # post-process kept out of the loss (steps.md Step 3); None => sparse-only. The
@@ -88,7 +96,10 @@ class MatrixDiffusionModel(BaseModel):
                 F_y = ext.extract(dy['verts'], dy['dist'], ys['idx'])
         else:                                                       # frozen .npy features
             F_x, F_y = b(xs['feat']), b(ys['feat'])
-        if self.ablate_features:                                    # P_t-only diagnostic
+        if self.ablate_features:                                    # P_t-only diagnostic (always on)
+            F_x, F_y = torch.zeros_like(F_x), torch.zeros_like(F_y)
+        elif self.is_train and self.feature_dropout > 0.0 \
+                and torch.rand(1).item() < self.feature_dropout:    # CFG conditioning dropout
             F_x, F_y = torch.zeros_like(F_x), torch.zeros_like(F_y)
         gt = data.get('gt_perm')
         P0 = b(gt) if gt is not None else None
@@ -105,7 +116,7 @@ class MatrixDiffusionModel(BaseModel):
     def _forward_ce(self, F_x, F_y, D_x, D_y, P0, u0, t):
         """One noised forward at time t: returns (row-CE loss, row log-probs).
         Shared by the training step and the loss-vs-t diagnostic."""
-        u_t = q_sample(u0, t, s=self.schedule_s)                   # VP forward marginal
+        u_t = q_sample(u0, t, s=self.schedule_s, logsnr_shift=self.logsnr_shift)  # VP forward marginal
         P_t = log_sinkhorn(u_t, n_iters=self.proj_iters).exp()     # Π_S read-in (DS)
         u0_hat = self.networks['denoiser'](P_t, F_x, F_y, D_x, D_y, t)
         logP = self._row_logprob(u0_hat)                           # row log-distribution
@@ -163,8 +174,8 @@ class MatrixDiffusionModel(BaseModel):
             if return_trajectory:                                  # cheap running snap
                 traj.append(self._row_logprob(u0_hat).argmax(-1))  # (B, n_y): current match
 
-            ab_t = cosine_alpha_bar(t_i, self.schedule_s)
-            ab_p = cosine_alpha_bar(t_prev, self.schedule_s)
+            ab_t = cosine_alpha_bar(t_i, self.schedule_s, self.logsnr_shift)
+            ab_p = cosine_alpha_bar(t_prev, self.schedule_s, self.logsnr_shift)
             eps_hat = (u - ab_t.sqrt() * u0_hat) / (1.0 - ab_t).clamp_min(1e-8).sqrt()
             # generalized DDIM: sigma=0 -> deterministic (default); sigma at eta=1 -> DDPM.
             # (1-ab_p) is 0 at the final step (t_prev=0 -> ab_p=1) so no noise is added there.

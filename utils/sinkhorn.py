@@ -113,16 +113,29 @@ def logit_target(P0: torch.Tensor, eta: float = 0.1, eps: float = 1e-8) -> torch
     return safe_log(P_tilde, eps)
 
 
-def cosine_alpha_bar(t: torch.Tensor, s: float = 0.008) -> torch.Tensor:
+def cosine_alpha_bar(t: torch.Tensor, s: float = 0.008, logsnr_shift: float = 0.0) -> torch.Tensor:
     """Cosine VP schedule ᾱ(t) (Nichol & Dhariwal). t in [0, 1]: ᾱ(0)=1 (clean), ᾱ(1)=0.
 
     ᾱ(t) = f(t)/f(0), f(u) = cos((u + s)/(1 + s)·π/2)². The small offset s keeps ᾱ from
     dropping too fast near t=0. Accepts a scalar or a batch tensor of times.
+
+    logsnr_shift b: uniformly shifts the log-SNR of the schedule by b nats,
+        log(ᾱ/(1-ᾱ)) -> log(ᾱ/(1-ᾱ)) + b, i.e. ᾱ -> ᾱ / (ᾱ + e^{-b}(1-ᾱ))
+        (Hoogeboom et al. 'simple diffusion' 2023; Chen 2023). b<0 lowers SNR at every
+        interior t (more noise) so the informative transition slides toward mid-trajectory;
+        b=0 is exactly the unshifted cosine. Endpoints ᾱ(0)=1, ᾱ(1)=0 are preserved for any b,
+        so it stays a valid VP schedule and the clean target at t=0 is untouched. This is the
+        knob for matching the schedule to a high-effective-SNR target (sharp logit spike ~
+        log n_sparse) rather than inheriting the image-domain profile.
     """
     if not torch.is_tensor(t):
         t = torch.tensor(t, dtype=torch.float32)
     f = lambda u: torch.cos((u + s) / (1.0 + s) * math.pi / 2.0) ** 2
-    return f(t) / f(torch.zeros_like(t))
+    ab = f(t) / f(torch.zeros_like(t))
+    if logsnr_shift != 0.0:
+        e = math.exp(-logsnr_shift)
+        ab = ab / (ab + e * (1.0 - ab)).clamp_min(1e-12)
+    return ab
 
 
 def q_sample(
@@ -130,6 +143,7 @@ def q_sample(
     t: torch.Tensor,
     noise: Optional[torch.Tensor] = None,
     s: float = 0.008,
+    logsnr_shift: float = 0.0,
 ) -> torch.Tensor:
     """Forward marginal in logit space: u_t = √ᾱ(t)·u0 + √(1-ᾱ(t))·ε, ε ~ N(0, I).
 
@@ -145,7 +159,7 @@ def q_sample(
     """
     if noise is None:
         noise = torch.randn_like(u0)
-    ab = cosine_alpha_bar(t, s)
+    ab = cosine_alpha_bar(t, s, logsnr_shift)
     if ab.dim() > 0 and ab.dim() == u0.dim() - 2:
         ab = ab.reshape(*ab.shape, 1, 1)
     return ab.sqrt() * u0 + (1.0 - ab).clamp_min(0.0).sqrt() * noise
