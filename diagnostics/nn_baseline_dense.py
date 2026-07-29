@@ -76,6 +76,66 @@ def _benchmark_dir(ckpt, eval_name):
     return os.path.join(experiment_root, 'results', 'benchmarks', eval_name)
 
 
+# --------------------------------------------------------------------------- #
+# Eval-time feature degradation
+# --------------------------------------------------------------------------- #
+# The worry is "the features do all the work". These knobs corrupt the extractor's per-vertex
+# field at a SINGLE point -- DiffusionNetExtractor._per_vertex -- through which BOTH the denoiser's
+# sparse conditioning (_sparse_inputs -> extract) and the densifier's global data term
+# (_densify_context -> extract_dense) flow. So every arm (nn, hungarian, diffusion) sees the exact
+# same corrupted features, which is the fairness constraint: the only variable is the matcher, and
+# we watch how each arm's dense MGE degrades as the feature signal is dialed down. This is the
+# "graceful degradation" regime -- it simulates the cross-dataset unreliability on the
+# in-distribution set with a continuous knob, and the prize is the crossover strength (if any) where
+# the diffusion arm starts beating plain Hungarian.
+
+def _gaussian_noise(feats, sigma):
+    """Additive isotropic Gaussian noise scaled to the feature RMS, so `sigma` is an interpretable
+    inverse-SNR knob (sigma=1 => noise std == signal std) that is comparable across datasets and
+    feature scales. Global (not per-channel) scale keeps relative channel magnitudes intact."""
+    scale = feats.detach().std()
+    return feats + sigma * scale * torch.randn_like(feats)
+
+
+def _geodesic_blur(feats, shape, t):
+    """Heat-kernel low-pass of the feature field over the manifold -- geodesically-nearby vertices
+    get averaged together, creating the LOCAL ambiguity that per-point matching cannot resolve but a
+    relational prior might (the actual cross-dataset failure mode, cf. limb garbling). Implemented
+    spectrally: project onto the LBO eigenbasis (mass-weighted), damp mode k by exp(-t * lambda_k),
+    reconstruct. Eigenvalues are normalised by their mean so the diffusion time `t` is O(1) and
+    comparable across meshes of different scale."""
+    dev = feats.device
+    evecs = shape['evecs'].to(dev).float()                          # (V, K)
+    evals = shape['evals'].to(dev).float()                          # (K,)
+    mass = shape['mass'].to(dev).float()                            # (V,)
+    k = min(evecs.shape[1], evals.shape[0])
+    evecs, evals = evecs[:, :k], evals[:k]
+    scale = evals[evals > 0].mean().clamp_min(1e-8)                 # scale-invariant diffusion time
+    decay = torch.exp(-t * evals / scale)                          # (K,)
+    coeff = evecs.t() @ (mass[:, None] * feats)                    # (K, d) mass-weighted projection
+    return evecs @ (decay[:, None] * coeff)                        # (V, d) smoothed field
+
+
+def _install_feature_degradation(model, mode, strength):
+    """Monkeypatch the extractor's _per_vertex so every downstream consumer sees the corrupted
+    field. Returns a short tag for output filenames. No-op (returns '') when mode is None."""
+    if mode is None:
+        return ''
+    ext = model.networks.get('extractor')
+    if ext is None or not getattr(ext, 'needs_operators', False):
+        raise ValueError("feature degradation needs a DiffusionNet extractor (needs_operators); "
+                         "this config exposes no per-vertex feature field to corrupt")
+    orig = ext._per_vertex
+    if mode == 'noise':
+        def wrapped(shape, _orig=orig): return _gaussian_noise(_orig(shape), strength)
+    elif mode == 'blur':
+        def wrapped(shape, _orig=orig): return _geodesic_blur(_orig(shape), shape, strength)
+    else:
+        raise ValueError(f"unknown degradation mode {mode!r}")
+    ext._per_vertex = wrapped
+    return f'{mode}{strength:g}'
+
+
 def _build(config_path, checkpoint, device, fps_metric, split='test', exclude_self=False):
     """Load a trained checkpoint + a dataset split like evaluate.py, forced into the honest
     independent-FPS regime with dense reporting on (the densifier is required). `split` selects
@@ -158,9 +218,12 @@ def _summary(err):
 
 
 @torch.no_grad()
-def run(config_path, checkpoint, device, fps_metric, num_pairs, seed, with_diffusion, with_hungarian):
+def run(config_path, checkpoint, device, fps_metric, num_pairs, seed, with_diffusion, with_hungarian,
+        degrade_mode=None, degrade_strength=0.0):
     model, dataset, opt, ckpt = _build(config_path, checkpoint, device, fps_metric)
     name = opt['name']
+    torch.manual_seed(seed)                                          # reproducible noise draws
+    deg_tag = _install_feature_degradation(model, degrade_mode, degrade_strength)
     if not num_pairs:
         idxs = list(range(len(dataset)))
     else:
@@ -182,6 +245,8 @@ def run(config_path, checkpoint, device, fps_metric, num_pairs, seed, with_diffu
     summary = {'name': name, 'checkpoint': ckpt, 'n_pairs': len(idxs),
                'fps_metric': getattr(dataset, 'fps_metric', 'config'),
                'feat_source': getattr(model.densifier, 'feat_source', None),
+               'degradation': (None if degrade_mode is None
+                               else {'mode': degrade_mode, 'strength': degrade_strength}),
                'nn_baseline': _summary(err['nn'])}                  # key kept for older result files
     for k in ('hungarian', 'diffusion'):
         if k in err:
@@ -193,12 +258,13 @@ def run(config_path, checkpoint, device, fps_metric, num_pairs, seed, with_diffu
 
     out_dir = _benchmark_dir(ckpt, name)
     os.makedirs(out_dir, exist_ok=True)
-    np.savez(os.path.join(out_dir, 'nn_baseline_dense.npz'),
+    stem = 'nn_baseline_dense' + (f'__{deg_tag}' if deg_tag else '')  # keep clean run un-clobbered
+    np.savez(os.path.join(out_dir, f'{stem}.npz'),
              nn_error=err['nn'],
              hungarian_error=err.get('hungarian', np.array([])),
              diffusion_error=err.get('diffusion', np.array([])))
     summary['out_dir'] = out_dir
-    with open(os.path.join(out_dir, 'nn_baseline_dense.json'), 'w') as f:
+    with open(os.path.join(out_dir, f'{stem}.json'), 'w') as f:
         json.dump(summary, f, indent=2)
     return summary
 
@@ -207,6 +273,9 @@ def _print(s):
     print(f"\nexperiment      : {s['name']}")
     print(f"checkpoint      : {s['checkpoint']}")
     print(f"pairs / fps     : {s['n_pairs']} / {s['fps_metric']}   densifier feat_source: {s['feat_source']}")
+    if s.get('degradation'):
+        d = s['degradation']
+        print(f"feature degrade : {d['mode']} @ strength {d['strength']:g}  (all arms, extractor output)")
     print(f"\n{'matcher':>17} {'dense MGE':>11} {'median':>9} {'p90':>9} {'gross>0.1':>11}")
     print('-' * 60)
     for key, label in (('nn_baseline', 'feature-NN'), ('hungarian', 'feature+Hungarian'),
@@ -237,10 +306,26 @@ def main():
     p.add_argument('--fps-metric', choices=('config', 'geodesic', 'euclidean'), default='config',
                    help='override the dataset FPS metric (default: whatever the config says)')
     p.add_argument('--device', default=None, help="'cuda' / 'cpu'; auto-detected when omitted")
+    deg = p.add_mutually_exclusive_group()
+    deg.add_argument('--feature-noise', type=float, default=None, metavar='SIGMA',
+                     help='corrupt extractor features (all arms) with additive Gaussian noise; '
+                          'SIGMA is noise std / feature std (inverse SNR). Sweep e.g. 0.25 0.5 1 2')
+    deg.add_argument('--feature-blur', type=float, default=None, metavar='T',
+                     help='corrupt extractor features (all arms) with heat-kernel geodesic blur; '
+                          'T is scale-normalised diffusion time (larger = more local smoothing). '
+                          'Sweep e.g. 0.05 0.1 0.2 0.5')
     args = p.parse_args()
 
+    if args.feature_noise is not None:
+        degrade_mode, degrade_strength = 'noise', args.feature_noise
+    elif args.feature_blur is not None:
+        degrade_mode, degrade_strength = 'blur', args.feature_blur
+    else:
+        degrade_mode, degrade_strength = None, 0.0
+
     s = run(args.config, args.checkpoint, args.device, args.fps_metric,
-            args.num_pairs, args.seed, not args.no_diffusion, not args.no_hungarian)
+            args.num_pairs, args.seed, not args.no_diffusion, not args.no_hungarian,
+            degrade_mode, degrade_strength)
     _print(s)
     print(f"\nper-pair errors + JSON under: {s['out_dir']}/")
 
