@@ -1,0 +1,32 @@
+{
+  "name": "scape_diffusionnet_512_FMD",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/diffusionnet/scape_diffusionnet_512_FMD/models/final.pth",
+  "n_pairs": 380,
+  "fps_metric": "euclidean",
+  "feat_source": "diffnet",
+  "degradation": {
+    "mode": "noise",
+    "strength": 0.5
+  },
+  "nn_baseline": {
+    "dense_MGE": 0.018896982073783875,
+    "median": 0.018562648445367813,
+    "p90": 0.037412215024232864,
+    "gross_gt_0.1": 0.0007878947368421053
+  },
+  "hungarian": {
+    "dense_MGE": 0.019091879948973656,
+    "median": 0.018695369362831116,
+    "p90": 0.037744149565696716,
+    "gross_gt_0.1": 0.0007931578947368421
+  },
+  "diffusion": {
+    "dense_MGE": 0.01912970468401909,
+    "median": 0.018725676462054253,
+    "p90": 0.03785087540745735,
+    "gross_gt_0.1": 0.0007994736842105263
+  },
+  "delta_MGE_nn_minus_diffusion": -0.00023272261023521423,
+  "delta_MGE_hungarian_minus_diffusion": -3.7824735045433044e-05,
+  "out_dir": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/diffusionnet/scape_diffusionnet_512_FMD/results/benchmarks/scape_diffusionnet_512_FMD"
+}
