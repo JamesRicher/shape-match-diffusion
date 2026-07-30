@@ -185,9 +185,22 @@ def _maybe_subset(dataset, n):
     return Subset(dataset, indices)
 
 
+def _build_phase(spec):
+    """Build one dataset, or a ConcatDataset when spec is a list of dataset dicts.
+
+    A list mixes datasets for a phase (e.g. FAUST+SCAPE joint training): each entry is a
+    normal dataset dict built independently, then concatenated and shuffled together by the
+    DataLoader. Entries must yield the same item structure (matching n_sparse for the sparse
+    matcher), since the model sees them interleaved. A plain dict is the single-dataset case.
+    """
+    if isinstance(spec, (list, tuple)):
+        return ConcatDataset([build_dataset(d) for d in spec])
+    return build_dataset(spec)
+
+
 def build_dataloaders(opt, num_workers):
-    train_set = build_dataset(opt['datasets']['train'])
-    val_set = build_dataset(opt['datasets']['val'])
+    train_set = _build_phase(opt['datasets']['train'])
+    val_set = _build_phase(opt['datasets']['val'])
 
     # optional val subset (opt['val']['subset']): validation runs a sampler per pair, so
     # the full val set can be slow; a fixed subset keeps epoch-to-epoch numbers comparable.

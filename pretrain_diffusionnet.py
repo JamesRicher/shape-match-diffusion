@@ -20,7 +20,7 @@ import time
 import argparse
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 from tqdm import tqdm
 
 from utils.options import load_yaml
@@ -37,6 +37,19 @@ _SPARSE_KEYS = ('gradX', 'gradY')
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CONFIG = os.path.join(ROOT, 'debug', 'feature_extractor', 'configs', 'faust_diffusionnet.yaml')
+
+
+def _build_phase(spec):
+    """Build one dataset, or a ConcatDataset when spec is a list of dataset dicts.
+
+    A list mixes datasets for a phase (e.g. pretrain the extractor jointly on FAUST+SCAPE):
+    each entry is built independently, then concatenated and shuffled together by the
+    DataLoader. Entries must yield the same item structure (matching n_sparse). Mirrors
+    train._build_phase. A plain dict is the single-dataset case.
+    """
+    if isinstance(spec, (list, tuple)):
+        return ConcatDataset([build_dataset(d) for d in spec])
+    return build_dataset(spec)
 
 
 def _op_collate(batch):
@@ -117,8 +130,8 @@ def main():
     final_ckpt = os.path.join(models_dir, 'final.pth')
     tb_dir = os.path.join(run_dir, 'tb')
 
-    train_set = build_dataset(opt['datasets']['train'])
-    val_set = build_dataset(opt['datasets']['val'])
+    train_set = _build_phase(opt['datasets']['train'])
+    val_set = _build_phase(opt['datasets']['val'])
 
     ext = build_network(dict(opt['network'])).to(device)
     optim = torch.optim.AdamW(ext.parameters(), lr=lr, weight_decay=wd)

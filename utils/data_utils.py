@@ -29,6 +29,18 @@ def load_corres(corr_file: str) -> np.ndarray:
         return np.array([int(l.strip())-1 for l in f if l.strip()], dtype=np.int64)
 
 
+def load_map(map_file: str) -> np.ndarray:
+    """Load a SHREC19-style dense pointwise map (.map file).
+
+    Line k (1-indexed) holds the 1-indexed target-shape vertex matching source vertex k.
+    Returns a 0-indexed (V_src,) array of target vertex indices. Unlike a .vts template
+    map this is a per-pair correspondence, so it is attached by the pair dataset, not the
+    single-shape dataset.
+    """
+    assert os.path.isfile(map_file), f"Invalid .map file: {map_file}"
+    return np.loadtxt(map_file, dtype=np.int64) - 1
+
+
 def load_off(off_file: str) -> Tuple[np.ndarray, np.ndarray]:
     assert os.path.isfile(off_file), f"Invalid .off file: {off_file}"
     with open(off_file) as f:
