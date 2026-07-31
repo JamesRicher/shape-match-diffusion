@@ -27,13 +27,14 @@ def build_opt(args):
     opt = load_yaml(args.config)
     for override in (args.set or []):
         apply_override(opt, override)
-    if args.name is not None:
-        opt['name'] = args.name
     if args.device is not None:
         opt['device'] = args.device
 
     opt['is_train'] = False  # no optimizers/schedulers/losses for a pure eval pass
 
+    # NOTE: -n/--name is NOT applied here. It names the results/ SUBDIR (leaf) only (see evaluate);
+    # the experiment paths -- and thus the results ROOT and the default checkpoint -- stay derived
+    # from the config's own name, so -n picks the leaf, never the model directory.
     resolve_experiment_paths(opt)
     ckpt = args.checkpoint or os.path.join(opt['path']['models'], 'final.pth')
     opt['path']['resume_state'] = ckpt
@@ -77,13 +78,42 @@ def eval_tag_for(opt, override=None):
     return re.sub(r'[^A-Za-z0-9._-]+', '_', tag).strip('_') or 'test'
 
 
+def results_root_for(opt, args, ckpt):
+    """The ``results/`` root this eval writes under. It must belong to the TRAINED MODEL, so that
+    one model directory owns all of its evaluations. The old code rooted results at the config's
+    experiment dir (opt['path']['results']), so a cross-dataset run -- target-dataset config plus
+    ``--checkpoint <other model>`` -- leaked the result into the eval dataset's folder, orphaning it
+    from the model that produced it. The root is decided purely by the checkpoint:
+
+      * a ``--checkpoint``  -> <checkpoint's experiment root>/results  (the model owns it)
+      * else                -> opt['path']['results']  (config's own model == checkpoint)
+
+    ``-n/--name`` deliberately does NOT enter here: it names the results/ LEAF (the eval_tag), not
+    the root, so the model dir always owns the output. The checkpoint root is two levels up from
+    ``.../models/<file>.pth``; a non-standard layout falls back to the config's dir with a warning.
+    Under whichever root, the leaf is the ``eval_tag`` (-n / --eval_tag / dataset name) so evaluating
+    one model on several datasets never clobbers."""
+    if args.checkpoint is not None:
+        ckpt_abs = os.path.abspath(ckpt)
+        if os.path.basename(os.path.dirname(ckpt_abs)) == 'models':
+            return os.path.join(os.path.dirname(os.path.dirname(ckpt_abs)), 'results')
+        get_root_logger().warning(
+            f'--checkpoint {ckpt} is not in a <experiment>/models/ layout; cannot infer its model '
+            f"directory, so results go under the config's dir.")
+    return opt['path']['results']
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Evaluate a trained shape-matching model on the test set.')
     parser.add_argument('-c', '--config', required=True, help='path to the YAML config used for training')
-    parser.add_argument('-n', '--name', default=None, help='override experiment name (subdir of experiments/)')
+    parser.add_argument('-n', '--name', default=None,
+                        help='name of the results/ subdir to write into (default: the test dataset '
+                             "name); the parent always follows the checkpoint's model, giving "
+                             '<model>/results/<name>. To evaluate a different model, use --checkpoint.')
     parser.add_argument('--checkpoint', default=None,
-                        help='checkpoint to evaluate (default: experiments/<name>/models/final.pth)')
+                        help='checkpoint to evaluate (default: experiments/<config-name>/models/'
+                             'final.pth); results file under THIS checkpoint\'s own experiment dir')
     parser.add_argument('--eval_tag', default=None,
                         help='subdir of results/ to write this evaluation into '
                              '(default: the test dataset name); lets one model be '
@@ -187,14 +217,21 @@ def evaluate(opt, ckpt, args):
     # the constructor loads `ckpt` (net-only, since is_train is False)
     model = build_model(opt)
     sparse_matcher = sparse_matcher and hasattr(model, 'report_sparse')
-    logger.info(f'Evaluating "{opt["name"]}" on {len(test_set)} test pairs '
-                f'(checkpoint: {ckpt}, device: {model.device}).')
 
-    # each evaluation lands in its own subdir of results/ (keyed by the test dataset),
-    # so evaluating this model on another dataset doesn't clobber earlier results.
-    eval_tag = eval_tag_for(opt, getattr(args, 'eval_tag', None))
-    results_dir = os.path.join(opt['path']['results'], eval_tag)
+    # Results are owned by the trained model's own experiment dir (results_root_for), keyed by the
+    # test dataset (eval_tag). So evaluating THIS model on another dataset adds a sibling subdir,
+    # and evaluating ANOTHER model here (cross-dataset, via --checkpoint) lands under that model's
+    # dir -- not this config's -- so every result sits beside the checkpoint that produced it.
+    # leaf name precedence: --eval_tag, then -n/--name, then the test dataset name. The root is the
+    # model's dir, so -n gives <model>/results/<name>.
+    eval_tag = eval_tag_for(opt, args.eval_tag or args.name)
+    results_root = results_root_for(opt, args, ckpt)
+    model_name = os.path.basename(os.path.dirname(results_root))    # the model dir that owns this
+    results_dir = os.path.join(results_root, eval_tag)
     os.makedirs(results_dir, exist_ok=True)
+
+    logger.info(f'Evaluating model "{model_name}" on {len(test_set)} test pairs -> results/{eval_tag}'
+                f'  (checkpoint: {ckpt}, device: {model.device}).')
 
     if sparse_matcher:
         # Two passes, because the sparse and dense stats need different sparse sampling:
@@ -234,8 +271,8 @@ def evaluate(opt, ckpt, args):
                          num_pairs=args.num_qual, seed=args.qual_seed)
 
     stats = {
-        'name': opt['name'],
-        'eval_tag': eval_tag,
+        'name': model_name,            # the model experiment dir that owns this result
+        'eval_tag': eval_tag,          # the results/ leaf (-n / --eval_tag / dataset name)
         'checkpoint': ckpt,
         'dataset': opt['datasets']['test'],
         'num_test_pairs': len(test_set),

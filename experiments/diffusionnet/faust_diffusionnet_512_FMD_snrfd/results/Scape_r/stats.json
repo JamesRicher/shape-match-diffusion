@@ -1,6 +1,6 @@
 {
-  "name": "scape_diffusionnet_512_FMD_snrfd",
-  "eval_tag": "scape",
+  "name": "faust_diffusionnet_512_FMD_snrfd",
+  "eval_tag": "Scape_r",
   "checkpoint": "experiments/diffusionnet/faust_diffusionnet_512_FMD_snrfd/models/final.pth",
   "dataset": {
     "name": "Scape_r",

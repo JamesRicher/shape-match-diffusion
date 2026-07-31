@@ -120,8 +120,11 @@ def sample_trajectory(model, data, times, sample_eta=0.0):
             actual[i] = float(t_i)
         u0_hat = net(P_t, F_x, F_y, D_x, D_y, t_i.reshape(1).expand(B))
 
-        ab_t = cosine_alpha_bar(t_i, model.schedule_s)
-        ab_p = cosine_alpha_bar(t_prev, model.schedule_s)
+        # honour the model's log-SNR shift so the reverse dynamics match training/sample() exactly
+        # (unshifted here would mis-schedule a snrfd model, e.g. logsnr_shift=-1.75)
+        shift = getattr(model, 'logsnr_shift', 0.0)
+        ab_t = cosine_alpha_bar(t_i, model.schedule_s, shift)
+        ab_p = cosine_alpha_bar(t_prev, model.schedule_s, shift)
         eps_hat = (u - ab_t.sqrt() * u0_hat) / (1.0 - ab_t).clamp_min(1e-8).sqrt()
         sigma = sample_eta * ((1.0 - ab_p) / (1.0 - ab_t).clamp_min(1e-8)).sqrt() \
                 * (1.0 - ab_t / ab_p.clamp_min(1e-8)).clamp_min(0.0).sqrt()
@@ -224,7 +227,8 @@ def main():
         mats = subset_matrices(mats, args.n, args.seed)
     else:
         mats = build_matrices(args.n, times, args.perm, args.eta, args.tau, args.seed)
-    abars = [float(cosine_alpha_bar(torch.tensor(float(t)))) for t in times]
+    abar_shift = getattr(model, 'logsnr_shift', 0.0) if args.config else 0.0
+    abars = [float(cosine_alpha_bar(torch.tensor(float(t)), 0.008, abar_shift)) for t in times]
 
     n_rows = 2 if args.rows == "both" else 1
     heights = [1.0, 0.72][:n_rows]
