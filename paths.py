@@ -28,14 +28,16 @@ def _resolve_data_root():
 
 DATA_ROOT = _resolve_data_root()
 
-FAUST_DIR = osp.join(DATA_ROOT, "FAUST_r")
-SMAL_DIR  = osp.join(DATA_ROOT, "SMAL_r")
-SCAPE_DIR = osp.join(DATA_ROOT, "SCAPE_r")
+FAUST_DIR   = osp.join(DATA_ROOT, "FAUST_r")
+SMAL_DIR    = osp.join(DATA_ROOT, "SMAL_r")
+SCAPE_DIR   = osp.join(DATA_ROOT, "SCAPE_r")
+SHREC19_DIR = osp.join(DATA_ROOT, "SHREC19_r")
 
 DEFAULT_DATA_ROOTS = {
-    "Faust_r": FAUST_DIR,
-    "Smal_r":  SMAL_DIR,
-    "Scape_r": SCAPE_DIR,
+    "Faust_r":   FAUST_DIR,
+    "Smal_r":    SMAL_DIR,
+    "Scape_r":   SCAPE_DIR,
+    "Shrec19_r": SHREC19_DIR,
 }
 
 EXPERIMENTS_ROOT      = osp.join(REPO_ROOT, "experiments")

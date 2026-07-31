@@ -1,0 +1,79 @@
+# Joint FAUST+SCAPE training: DiffusionNet extractor + FM densifier.
+# MIXED DATASET: `train`/`val` are LISTS of dataset dicts -> train.py concatenates them
+# (ConcatDataset) and the DataLoader shuffles the two together. Entries MUST share n_sparse
+# (and item structure) since the model sees them interleaved. See train._build_phase.
+#
+# WARM-START: the resume_state below is the FAUST-only HKS pretrain -- fine as a starting
+# point, but for a properly joint extractor pretrain DiffusionNet on FAUST+SCAPE too (make
+# pretrain_diffusionnet.py's datasets a list the same way) or cold-start (drop `path:`, set
+# both LRs to 1e-3). Extractor arch MUST match whatever pretrain checkpoint you load.
+#   python run_experiment.py -c configs/joint_diffusionnet/faust_scape_diffusionnet_512_FMD.yaml --num_qual 0 --num_workers 8
+name: faust_scape_diffusionnet_512_FMD
+group: diffusionnet                 # experiments/<group>/<name>/
+model_type: MatrixDiffusionModel
+is_train: true
+
+path:
+  resume_state: extractor_experiments/diffusion_net/faust_diffusionnet_hks/models/best.pth
+  resume: false
+
+datasets:
+  train:
+    - {name: Faust_r, type: SparsePairFaustDataset, phase: train, n_sparse: 512, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+    - {name: Scape_r, type: SparsePairScapeDataset, phase: train, n_sparse: 512, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  val:
+    - {name: Faust_r, type: SparsePairFaustDataset, phase: test, n_sparse: 512, exclude_self: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+    - {name: Scape_r, type: SparsePairScapeDataset, phase: test, n_sparse: 512, exclude_self: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  test:  {name: Faust_r, type: SparsePairFaustDataset, phase: test,  n_sparse: 512, exclude_self: true, ret_evecs: true, num_evecs: 200, fps_metric: euclidean}
+
+networks:
+  extractor:
+    type: DiffusionNetExtractor
+    out_dim: 128
+    input_type: hks
+    hidden: 128
+    n_block: 4
+    k_eig: 128
+    hks_count: 16
+  denoiser:
+    type: MatrixDenoiser
+    feat_dim: 128
+    dim: 128
+    heads: 4
+    depth: 6
+    n_anchors: 16
+    dropout: 0.0
+
+diffusion:
+  eta: 0.1
+  proj_iters: 6
+  schedule_s: 0.008
+  sample_steps: 50
+  final_iters: 20
+
+densifier:
+  type: FunctionalMapDensifier
+  feat_source: diffnet
+  k_fm: 120
+  n_e: 100
+  lm_bands: 20
+  lm_weight: 5.0
+  mu: 0.1
+  variance: 7.0
+
+eval:
+  sparse: true
+  dense: false
+
+train:
+  total_epochs: 30
+  log_freq: 20
+  optims:
+    extractor: {type: AdamW, lr: 1e-4, weight_decay: 1e-4}
+    denoiser:  {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+  schedulers:
+    extractor: {type: CosineAnnealingLR, eta_min: 1e-5}
+    denoiser:  {type: CosineAnnealingLR, eta_min: 1e-4}
+
+val:
+  subset: 40
