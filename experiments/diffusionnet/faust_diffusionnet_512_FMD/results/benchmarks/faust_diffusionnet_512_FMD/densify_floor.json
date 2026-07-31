@@ -1,0 +1,36 @@
+{
+  "name": "faust_diffusionnet_512_FMD",
+  "checkpoint": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/diffusionnet/faust_diffusionnet_512_FMD/models/final.pth",
+  "n_pairs": 380,
+  "fps_metric": "euclidean",
+  "feat_source": "diffnet",
+  "oracle_fm": {
+    "dense_MGE": 0.013249742798507214,
+    "median": 0.01275041326880455,
+    "p90": 0.026180513203144073,
+    "gross_gt_0.1": 0.0016878947368421052
+  },
+  "voronoi_floor": {
+    "dense_MGE": 0.02951512299478054,
+    "median": 0.026163307949900627,
+    "p90": 0.050213973969221115,
+    "gross_gt_0.1": 0.002601578947368421
+  },
+  "diffusion": {
+    "dense_MGE": 0.015609635971486568,
+    "median": 0.014319906942546368,
+    "p90": 0.02868783473968506,
+    "gross_gt_0.1": 0.0030336842105263156
+  },
+  "nn": {
+    "dense_MGE": 0.014752447605133057,
+    "median": 0.013999706134200096,
+    "p90": 0.02803889848291874,
+    "gross_gt_0.1": 0.0026689473684210524
+  },
+  "floor_MGE": 0.013249742798507214,
+  "actual_MGE": 0.015609635971486568,
+  "anchor_error_MGE": 0.002359893172979355,
+  "frac_from_anchors": 0.1511818198252712,
+  "out_dir": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/diffusionnet/faust_diffusionnet_512_FMD/results/benchmarks/faust_diffusionnet_512_FMD"
+}

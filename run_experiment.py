@@ -21,6 +21,10 @@ def parse_args():
                         help='subdir of results/ for the evaluation '
                              '(default: the test dataset name); keeps evaluations on '
                              'different datasets from overwriting each other')
+    parser.add_argument('--set', action='append', metavar='KEY=VALUE', default=None,
+                        help='override a config value by dotted key, repeatable '
+                             '(e.g. --set densifier.k_fm=160); pair with --eval_tag to avoid '
+                             'overwriting the default run')
     # forwarded to evaluate.evaluate() for the qualitative texture-transfer figures
     parser.add_argument('--num_qual', type=int, default=10,
                         help='number of random test pairs to render texture-transfer '

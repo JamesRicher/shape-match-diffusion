@@ -1,0 +1,36 @@
+{
+  "name": "scape_diffusionnet_512_FMD",
+  "checkpoint": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/diffusionnet/scape_diffusionnet_512_FMD/models/final.pth",
+  "n_pairs": 380,
+  "fps_metric": "euclidean",
+  "feat_source": "diffnet",
+  "oracle_fm": {
+    "dense_MGE": 0.014267533086240292,
+    "median": 0.01524615753442049,
+    "p90": 0.028556978330016136,
+    "gross_gt_0.1": 0.0004331578947368421
+  },
+  "voronoi_floor": {
+    "dense_MGE": 0.02906952239573002,
+    "median": 0.026596838608384132,
+    "p90": 0.05114100128412247,
+    "gross_gt_0.1": 0.0006021052631578947
+  },
+  "diffusion": {
+    "dense_MGE": 0.019103100523352623,
+    "median": 0.018690835684537888,
+    "p90": 0.037842340767383575,
+    "gross_gt_0.1": 0.0007936842105263158
+  },
+  "nn": {
+    "dense_MGE": 0.0188683420419693,
+    "median": 0.018529091030359268,
+    "p90": 0.03738885372877121,
+    "gross_gt_0.1": 0.0008768421052631579
+  },
+  "floor_MGE": 0.014267533086240292,
+  "actual_MGE": 0.019103100523352623,
+  "anchor_error_MGE": 0.004835567437112331,
+  "frac_from_anchors": 0.2531299791466355,
+  "out_dir": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/diffusionnet/scape_diffusionnet_512_FMD/results/benchmarks/scape_diffusionnet_512_FMD"
+}
