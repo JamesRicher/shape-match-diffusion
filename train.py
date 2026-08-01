@@ -7,6 +7,9 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Subset, ConcatDataset
 
+# Avoid "received 0 items of ancdata" FD exhaustion with many dataloader workers.
+torch.multiprocessing.set_sharing_strategy('file_system')
+
 import os.path as osp
 
 from datasets import build_dataset
