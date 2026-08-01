@@ -311,6 +311,12 @@ class SparsePairShapeDataset(PairShapeDataset):
 
     def __getitem__(self, index):
         item = super().__getitem__(index)          # {'first', 'second'} full dicts
+        return self._sparsify(item, index)
+
+    def _sparsify(self, item, index):
+        """Attach the sparse views to a fetched pair. Split out from __getitem__ so
+        subclasses that rewrite the pair's GT first (e.g. DT4D's cross-category corr
+        composition) can fetch, fix corr, then call this."""
         x, y = item['first'], item['second']
 
         if self.independent_fps:

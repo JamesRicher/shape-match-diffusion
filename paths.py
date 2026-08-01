@@ -32,12 +32,14 @@ FAUST_DIR   = osp.join(DATA_ROOT, "FAUST_r")
 SMAL_DIR    = osp.join(DATA_ROOT, "SMAL_r")
 SCAPE_DIR   = osp.join(DATA_ROOT, "SCAPE_r")
 SHREC19_DIR = osp.join(DATA_ROOT, "SHREC19_r")
+DT4D_DIR    = osp.join(DATA_ROOT, "DT4D_r")
 
 DEFAULT_DATA_ROOTS = {
     "Faust_r":   FAUST_DIR,
     "Smal_r":    SMAL_DIR,
     "Scape_r":   SCAPE_DIR,
     "Shrec19_r": SHREC19_DIR,
+    "Dt4d_r":    DT4D_DIR,
 }
 
 EXPERIMENTS_ROOT      = osp.join(REPO_ROOT, "experiments")

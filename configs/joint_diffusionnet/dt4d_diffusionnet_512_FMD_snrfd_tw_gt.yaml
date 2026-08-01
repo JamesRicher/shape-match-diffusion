@@ -1,0 +1,98 @@
+# DT4D_r joint model -- ULRSSM protocol: ONE model trained on the intra- AND inter-class pair
+# pools combined (datasets.train is a LIST -> ConcatDataset; 3410 + 5292 = 8702 pairs/epoch),
+# regimes split only at eval. In-training val/test use the inter pool (the harder,
+# non-isometric regime), mirroring ULRSSM's in-training test choice; evaluate the OTHER
+# regime from the same checkpoint via the --set override:
+#   python evaluate.py -c configs/joint_diffusionnet/dt4d_diffusionnet_512_FMD_snrfd_tw_gt.yaml \
+#       --set datasets.test.inter_class=false --eval_tag dt4d_intra
+# Style = _tw_gt (see faust_diffusionnet_512_FMD_snrfd_tw_gt.yaml): feature_dropout 0.5 +
+# work-band t_sampler + exclude_self, GEODESIC-GAUSSIAN target with logsnr_shift 0 (the soft
+# target's lower logit range already centers the GT-survival crossover at t~0.55; sigma 0.03
+# matches the n_sparse/area-determined 512-anchor NN spacing ~0.038, dataset-independent).
+# The t bands were measured on FAUST/SCAPE/SMAL -- a prior here, re-measure with
+# loss_vs_t_draws once a checkpoint exists. DiffusionNet extractor warm-started from the HKS
+# pretrain + FM densifier. Requires DT4D_r caches (dist/ + diffusion/ from preprocess, feats/)
+# and the pretrain FIRST:
+#   python pretrain_diffusionnet.py -c fe_configs/diffusion_net/dt4d_diffusionnet_hks.yaml --num_workers 8
+#   python run_experiment.py -c configs/joint_diffusionnet/dt4d_diffusionnet_512_FMD_snrfd_tw_gt.yaml --num_qual 0 --num_workers 8
+name: dt4d_diffusionnet_512_FMD_snrfd_tw_gt
+group: diffusionnet                 # experiments/<group>/<name>/
+model_type: MatrixDiffusionModel
+is_train: true
+
+path:
+  resume_state: extractor_experiments/diffusion_net/dt4d_diffusionnet_hks/models/best.pth
+  resume: false
+
+datasets:
+  # combined pools (ULRSSM): intra with exclude_self; inter has no diagonal by construction
+  train:
+    - {name: Dt4d_r, type: SparsePairDT4DDataset, phase: train, inter_class: false, n_sparse: 512, exclude_self: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+    - {name: Dt4d_r, type: SparsePairDT4DDataset, phase: train, inter_class: true,  n_sparse: 512, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  val:   {name: Dt4d_r, type: SparsePairDT4DDataset, phase: test, inter_class: true, n_sparse: 512, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  test:  {name: Dt4d_r, type: SparsePairDT4DDataset, phase: test, inter_class: true, n_sparse: 512, ret_evecs: true, num_evecs: 200, fps_metric: euclidean}
+
+networks:
+  extractor:
+    type: DiffusionNetExtractor
+    out_dim: 128
+    input_type: hks
+    hidden: 128
+    n_block: 4
+    k_eig: 128
+    hks_count: 16
+  denoiser:
+    type: MatrixDenoiser
+    feat_dim: 128
+    dim: 128
+    heads: 4
+    depth: 6
+    n_anchors: 16
+    dropout: 0.0
+
+diffusion:
+  eta: 0.1
+  proj_iters: 6
+  schedule_s: 0.008
+  logsnr_shift: 0.0      # plain cosine: the gaussian target already centers the work band (see header)
+  feature_dropout: 0.5   # CFG-style conditioning dropout; raised from 0.2 -- see faust _tw header
+  t_sampler:             # per-regime work-band t (loss onset measured by loss_vs_t_draws)
+    t_min_drop: 0.35
+    t_min_feat: 0.6
+    uniform_frac: 0.1
+  target:
+    type: gaussian       # geodesic soft target; near-miss tolerance matters MOST cross-category
+    sigma: 0.03          # kernel width, sqrt-area units (512-anchor NN spacing ~0.038)
+    cutoff: 0.09         # 3*sigma; kernel drops to `floor` beyond this distance
+    floor: 2.0e-4        # tail mass (relative to unit peak); ~floor*512 ≈ 0.1 = eta's budget
+  sample_steps: 50
+  final_iters: 20
+
+densifier:
+  type: FunctionalMapDensifier
+  feat_source: diffnet   # dense global data term from the trained DiffusionNet extractor (falls back to WKS if absent)
+  k_fm: 120
+  n_e: 100
+  lm_bands: 20
+  lm_weight: 5.0
+  mu: 0.1
+  variance: 7.0
+
+eval:
+  sparse: true
+  dense: false
+
+train:
+  # combined pool = 8702 pairs/epoch; 22 epochs ~ FAUST's 30 x ~6300 total-step budget
+  total_epochs: 22
+  log_freq: 20
+  optims:
+    # warm-started extractor: gentle fine-tune (10x lower LR); denoiser trains from scratch
+    extractor: {type: AdamW, lr: 1e-4, weight_decay: 1e-4}
+    denoiser:  {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+  schedulers:
+    extractor: {type: CosineAnnealingLR, eta_min: 1e-5}
+    denoiser:  {type: CosineAnnealingLR, eta_min: 1e-4}
+
+val:
+  subset: 40

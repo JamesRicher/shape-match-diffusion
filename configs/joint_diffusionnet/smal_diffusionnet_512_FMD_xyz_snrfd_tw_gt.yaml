@@ -1,0 +1,86 @@
+# SMAL xyz _tw + GEODESIC-GAUSSIAN training target; mirrors faust_diffusionnet_512_FMD_snrfd_tw_gt.yaml
+# (see its header for the full rationale): soft target ∝ exp(-d_geo²/2σ²) around the GT match for
+# both u0 and the CE weights, l_ce logged as KL, logsnr_shift 0 (the soft target's lower logit
+# range already centers the GT-survival crossover at t~0.55 -- measured on the FAUST _tw_gt
+# config; transfers since n_sparse/eta/sigma are identical and SMAL's measured 512-anchor NN
+# spacing is 0.036). SMAL is where the metric-aware target has most to win: the tail blow-ups
+# are far misses the one-hot CE never taught the model to prefer shrinking. Judge on sparse
+# avg_error / dense MGE / PCK, NOT exact-match acc. Everything else identical to
+# smal_diffusionnet_512_FMD_xyz_snrfd_tw.yaml. Pretrain FIRST (see the _snrfd header).
+name: smal_diffusionnet_512_FMD_xyz_snrfd_tw_gt
+group: diffusionnet                 # experiments/<group>/<name>/
+model_type: MatrixDiffusionModel
+is_train: true
+
+path:
+  resume_state: extractor_experiments/diffusion_net/smal_diffusionnet_xyz/models/best.pth
+  resume: false
+
+datasets:
+  train: {name: Smal_r, type: SparsePairSmalDataset, phase: train, n_sparse: 512, exclude_self: true, category: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  val:   {name: Smal_r, type: SparsePairSmalDataset, phase: test,  n_sparse: 512, exclude_self: true, category: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  test:  {name: Smal_r, type: SparsePairSmalDataset, phase: test,  n_sparse: 512, exclude_self: true, category: true, ret_evecs: true, num_evecs: 200, fps_metric: euclidean}
+
+networks:
+  extractor:
+    type: DiffusionNetExtractor
+    out_dim: 128
+    input_type: xyz
+    rot_aug: [0, 180, 0]   # must match the pretrain config: the warm start learned yaw-invariance
+    hidden: 128
+    n_block: 4
+    k_eig: 128
+  denoiser:
+    type: MatrixDenoiser
+    feat_dim: 128
+    dim: 128
+    heads: 4
+    depth: 6
+    n_anchors: 16
+    dropout: 0.0
+
+diffusion:
+  eta: 0.1
+  proj_iters: 6
+  schedule_s: 0.008
+  logsnr_shift: 0.0      # plain cosine: the gaussian target already centers the work band (see header)
+  feature_dropout: 0.5   # CFG-style conditioning dropout; raised from 0.2 -- see faust _tw header
+  t_sampler:             # per-regime work-band t (loss onset measured by loss_vs_t_draws)
+    t_min_drop: 0.35
+    t_min_feat: 0.6
+    uniform_frac: 0.1
+  target:
+    type: gaussian       # geodesic soft target (default onehot = original behaviour)
+    sigma: 0.03          # kernel width, sqrt-area units; SMAL 512-anchor NN spacing ~0.036
+    cutoff: 0.09         # 3*sigma; kernel drops to `floor` beyond this distance
+    floor: 2.0e-4        # tail mass (relative to unit peak); ~floor*512 ≈ 0.1 = eta's budget
+  sample_steps: 50
+  final_iters: 20
+
+densifier:
+  type: FunctionalMapDensifier
+  feat_source: diffnet   # dense global data term from the trained DiffusionNet extractor (falls back to WKS if absent)
+  k_fm: 120
+  n_e: 100
+  lm_bands: 20
+  lm_weight: 5.0
+  mu: 0.1
+  variance: 7.0
+
+eval:
+  sparse: true
+  dense: false
+
+train:
+  # ~80% of FAUST's joint budget; SMAL_r cat train = 29 shapes (~840 pairs/epoch), matches GCN FMD
+  total_epochs: 180
+  log_freq: 20
+  optims:
+    extractor: {type: AdamW, lr: 1e-4, weight_decay: 1e-4}
+    denoiser:  {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+  schedulers:
+    extractor: {type: CosineAnnealingLR, eta_min: 1e-5}
+    denoiser:  {type: CosineAnnealingLR, eta_min: 1e-4}
+
+val:
+  subset: 40

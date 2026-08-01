@@ -1,0 +1,39 @@
+# DiffusionNet pretraining on DT4D_r -- ULRSSM protocol: ONE model trained on the intra- AND
+# inter-class pair pools combined (their train.py sums every train_* dataset; the regimes only
+# split at test time). datasets.train is a LIST -> ConcatDataset, shuffled together. Val runs
+# on the inter pool (the harder, non-isometric regime), mirroring ULRSSM's in-training test
+# choice. Intrinsic HKS input: ULRSSM uses an intrinsic descriptor (WKS) for DT4D; the
+# characters share no cross-category coordinate alignment, so xyz would key on per-animation
+# frames. Inter pairs exist only where a cross-map does (crypto-hub star; GT composed via the
+# reference alignment by the dataset). Requires the DT4D_r caches (dist/ + diffusion/ from
+# preprocess, feats/ for the sparse GT pipeline).
+#   python pretrain_diffusionnet.py -c fe_configs/diffusion_net/dt4d_diffusionnet_hks.yaml --num_workers 8
+#   python evaluate_extractor.py    -c fe_configs/diffusion_net/dt4d_diffusionnet_hks.yaml --dense --no_vis
+
+name: dt4d_diffusionnet_hks       # run dir = extractor_experiments/diffusion_net/<name>/
+
+datasets:
+  # ret_evecs: true REQUIRED (num_evecs >= network.k_eig). pumpkinhulk is excluded by the
+  # dataset itself; exclude_self on the intra pool (self-pairs are ~0-loss dead steps; the
+  # inter pool has no diagonal by construction).
+  train:
+    - {name: Dt4d_r, type: SparsePairDT4DDataset, phase: train, inter_class: false, n_sparse: 256, exclude_self: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+    - {name: Dt4d_r, type: SparsePairDT4DDataset, phase: train, inter_class: true,  n_sparse: 256, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  val: {name: Dt4d_r, type: SparsePairDT4DDataset, phase: test, inter_class: true, n_sparse: 256, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+
+network:
+  type: DiffusionNetExtractor
+  out_dim: 128
+  input_type: hks         # intrinsic HKS descriptors (transferable, symmetry-ambiguous)
+  hidden: 128
+  n_block: 4
+  k_eig: 128              # <= datasets.*.num_evecs
+  hks_count: 16           # number of HKS bands fed in
+
+train:
+  epochs: 25
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  tau: 0.07               # InfoNCE temperature
+  num_workers: 4          # pin_memory off (collate ships sparse gradX/gradY)
+  eval_limit: 40          # val pairs scored each epoch (null = all)
