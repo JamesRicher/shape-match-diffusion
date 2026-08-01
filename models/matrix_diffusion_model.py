@@ -19,7 +19,8 @@ from tqdm import tqdm
 
 from utils.registry import MODEL_REGISTRY
 from utils.logger import get_root_logger
-from utils.sinkhorn import logit_target, q_sample, cosine_alpha_bar, log_sinkhorn
+from utils.sinkhorn import (logit_target, gaussian_target, safe_log, q_sample,
+                            cosine_alpha_bar, log_sinkhorn)
 from densifiers import build_densifier, DensifyContext
 from metrics.geo_metric import calculate_geodesic_error, plot_pck
 from .base_model import BaseModel
@@ -58,6 +59,19 @@ class MatrixDiffusionModel(BaseModel):
         # P_t already contains the answer). `uniform_frac` of steps keep t ~ U[0,1] so the
         # near-clean regime the reverse sampler visits at inference never atrophies.
         # None (default) = plain t ~ U[0,1].
+        # training target (diffusion.target). 'onehot' (default) = the original behaviour:
+        # eta-smoothed logit embedding, row-CE against the HARD permutation (zero loss floor).
+        # 'gaussian' = geodesic soft target (utils.sinkhorn.gaussian_target): mass falls off
+        # with geodesic distance from the GT match on X, floored past the cutoff. Used for
+        # BOTH the clean logits u0 and the CE weights (the denoiser's fixed point and its
+        # supervision must agree); the target's entropy is subtracted from the loss so the
+        # logged value is the KL, with the same zero floor / gradients as before.
+        tg = cfg.get('target', {})
+        self.target_type = tg.get('type', 'onehot')
+        assert self.target_type in ('onehot', 'gaussian'), f'unknown target {self.target_type}'
+        self.target_sigma = tg.get('sigma', 0.03)       # kernel width, sqrt-area units (~anchor spacing)
+        self.target_cutoff = tg.get('cutoff', 3.0 * self.target_sigma)
+        self.target_floor = tg.get('floor', 2e-4)       # tail mass past the cutoff (~eta/m's budget)
         ts = cfg.get('t_sampler')
         self.t_sampler = None if ts is None else {
             't_min_drop': ts.get('t_min_drop', 0.35),   # band floor for feature-dropped steps
@@ -128,7 +142,9 @@ class MatrixDiffusionModel(BaseModel):
 
     def _forward_ce(self, F_x, F_y, D_x, D_y, P0, u0, t):
         """One noised forward at time t: returns (row-CE loss, row log-probs).
-        Shared by the training step and the loss-vs-t diagnostic."""
+        P0 here is the CE weight matrix from _target (the hard permutation for the onehot
+        target, the geodesic soft target otherwise). Shared by the training step and the
+        loss-vs-t diagnostic."""
         u_t = q_sample(u0, t, s=self.schedule_s, logsnr_shift=self.logsnr_shift)  # VP forward marginal
         P_t = log_sinkhorn(u_t, n_iters=self.proj_iters).exp()     # Π_S read-in (DS)
         u0_hat = self.networks['denoiser'](P_t, F_x, F_y, D_x, D_y, t)
@@ -139,6 +155,17 @@ class MatrixDiffusionModel(BaseModel):
     # ------------------------------------------------------------------ #
     # training step
     # ------------------------------------------------------------------ #
+    def _target(self, P0, D_x):
+        """Training target triple (P_ce, u0, H): CE weights, clean logits, entropy floor.
+        onehot: hard-P0 CE + eta-smoothed logits (original behaviour), H = 0. gaussian:
+        the geodesic soft target for both, H = its entropy — CE minus H is the KL to the
+        target, restoring a zero floor so losses stay comparable across targets/sigmas."""
+        if self.target_type == 'gaussian':
+            T = gaussian_target(P0, D_x, self.target_sigma, self.target_cutoff, self.target_floor)
+            logT = safe_log(T)
+            return T, logT, -(T * logT).sum(-1).mean()
+        return P0, logit_target(P0, self.eta), 0.0
+
     def _sample_t(self, B, dropped):
         """Continuous train-time t. Uniform on [0,1] without a t_sampler; otherwise banded
         to the regime's work band (see __init__), with a uniform_frac full-range floor."""
@@ -154,10 +181,11 @@ class MatrixDiffusionModel(BaseModel):
         drop = self.is_train and self.feature_dropout > 0.0 \
                 and torch.rand(1).item() < self.feature_dropout    # CFG conditioning dropout
         F_x, F_y, D_x, D_y, P0 = self._sparse_inputs(data, drop_features=drop)
-        u0 = logit_target(P0, self.eta)                            # clean logits
+        P_ce, u0, H = self._target(P0, D_x)
         t = self._sample_t(P0.shape[0], drop)
-        loss, logP = self._forward_ce(F_x, F_y, D_x, D_y, P0, u0, t)
-        self.loss_metrics = OrderedDict(l_ce=loss)
+        loss, logP = self._forward_ce(F_x, F_y, D_x, D_y, P_ce, u0, t)
+        # H is constant w.r.t. parameters: same gradients, logged/optimized value is the KL
+        self.loss_metrics = OrderedDict(l_ce=loss - H)
         self.P0_hat = logP.exp().detach()
 
     # ------------------------------------------------------------------ #
@@ -290,12 +318,12 @@ class MatrixDiffusionModel(BaseModel):
         model uses P_t, loss falls toward small t (P_t ~ clean); a flat curve means the
         denoiser ignores P_t and the pipeline is broken. Returns {t: mean_loss}."""
         F_x, F_y, D_x, D_y, P0 = self._sparse_inputs(data)
-        u0 = logit_target(P0, self.eta)
+        P_ce, u0, H = self._target(P0, D_x)
         B = P0.shape[0]
         curve = {}
         for tv in torch.linspace(0.05, 0.95, n_bins, device=self.device):
             t = tv.reshape(1).expand(B)
-            losses = [self._forward_ce(F_x, F_y, D_x, D_y, P0, u0, t)[0].item()
+            losses = [self._forward_ce(F_x, F_y, D_x, D_y, P_ce, u0, t)[0].item() - float(H)
                       for _ in range(repeats)]
             curve[round(float(tv), 3)] = float(np.mean(losses))
         return curve

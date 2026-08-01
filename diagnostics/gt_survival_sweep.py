@@ -40,7 +40,7 @@ from tqdm import tqdm
 
 from datasets import build_dataset
 from utils.options import load_yaml
-from utils.sinkhorn import logit_target, q_sample, log_sinkhorn
+from utils.sinkhorn import logit_target, gaussian_target, safe_log, q_sample, log_sinkhorn
 
 INK, GRID, FAINT, REF = '#1B2027', '#E3E6E4', '#8A929C', '#A65A12'
 C_LIGHT, C_DARK = '#A9CFCB', '#0E4A46'          # sequential teal ramp (shift magnitude)
@@ -62,11 +62,12 @@ def _dataset(config_path):
     dataset.independent_fps = False             # bijective sampling -> data['gt_perm']
     diff = opt.get('diffusion', {})
     return (dataset, opt.get('name', 'model'),
-            diff.get('eta', 0.1), diff.get('schedule_s', 0.008), diff.get('proj_iters', 6))
+            diff.get('eta', 0.1), diff.get('schedule_s', 0.008), diff.get('proj_iters', 6),
+            diff.get('target', {}))
 
 
 @torch.no_grad()
-def _curves(dataset, idxs, shifts, tgrid, draws, eta, s, proj, device, gen):
+def _curves(dataset, idxs, shifts, tgrid, draws, eta, s, proj, device, gen, target=None):
     """Returns acc[b, t] and medce[b, t], averaged over pairs and noise draws."""
     nb, nt = len(shifts), len(tgrid)
     acc = np.zeros((nb, nt))
@@ -80,7 +81,14 @@ def _curves(dataset, idxs, shifts, tgrid, draws, eta, s, proj, device, gen):
             P0 = P0.unsqueeze(0)                # (1, n_y, n_x)
         m_ref = P0.shape[-1]
         gt = P0.argmax(-1)                      # (1, n_y)
-        u0 = logit_target(P0, eta)
+        if target and target.get('type') == 'gaussian':    # config's diffusion.target block
+            D_x = data['first']['sparse']['dist'].float().to(device).unsqueeze(0)
+            sigma = target.get('sigma', 0.03)
+            u0 = safe_log(gaussian_target(P0, D_x, sigma,
+                                          target.get('cutoff', 3.0 * sigma),
+                                          target.get('floor', 2e-4)))
+        else:
+            u0 = logit_target(P0, eta)
         for bi, b in enumerate(shifts):
             for ti, tv in enumerate(tgrid):
                 t = torch.full((1,), float(tv), device=device)
@@ -108,7 +116,7 @@ def _cross50(tgrid, acc_row):
 
 
 def run(config_path, shifts, num_pairs, draws, n_t, device, out_dir, seed):
-    dataset, name, eta, s, proj = _dataset(config_path)
+    dataset, name, eta, s, proj, target = _dataset(config_path)
     device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
     gen = torch.Generator(device=device).manual_seed(seed)
     rng = np.random.default_rng(seed)
@@ -116,7 +124,7 @@ def run(config_path, shifts, num_pairs, draws, n_t, device, out_dir, seed):
     idxs = sorted(rng.choice(len(dataset), size=n, replace=False).tolist())
     tgrid = np.linspace(0.02, 0.98, n_t)
 
-    acc, medce, m = _curves(dataset, idxs, shifts, tgrid, draws, eta, s, proj, device, gen)
+    acc, medce, m = _curves(dataset, idxs, shifts, tgrid, draws, eta, s, proj, device, gen, target)
     colors = _ramp(len(shifts))
     logm = float(np.log(m))
 

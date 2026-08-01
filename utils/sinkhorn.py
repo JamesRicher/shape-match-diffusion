@@ -113,6 +113,40 @@ def logit_target(P0: torch.Tensor, eta: float = 0.1, eps: float = 1e-8) -> torch
     return safe_log(P_tilde, eps)
 
 
+def gaussian_target(
+    P0: torch.Tensor,
+    D_x: torch.Tensor,
+    sigma: float,
+    cutoff: Optional[float] = None,
+    floor: float = 2e-4,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """Geodesic soft assignment target: row j ∝ exp(-d(g(j), ·)² / 2σ²), floored past cutoff.
+
+    Puts a metric on the label space that plain row-CE against a permutation lacks: a
+    near-miss (geodesically close X-anchor) keeps target mass, a far miss costs the same
+    as any other. The kernel row of the GT match is selected by P0 itself (T = P0 K), so a
+    relaxed P0 mixes kernel rows accordingly.
+
+    Args:
+        P0: (..., R, C) ground-truth assignment (permutation / relaxation), rows sum to 1.
+        D_x: (..., C, C) geodesic distances between X sparse points (sqrt-area units).
+        sigma: kernel width in D_x units, ~the anchor NN spacing (FAUST n_sparse=512:
+            spacing ~0.038, sigma 0.03 puts ~82% of mass on GT + its ~4 neighbours).
+        cutoff: distance beyond which the kernel drops to `floor`; default 3*sigma.
+        floor: tail value (relative to the unit peak) past the cutoff — the uniform
+            label-smoothing mass, playing eta/m's role in logit_target. Total tail mass
+            is ~floor*C, so 2e-4 at C=512 matches eta=0.1's smoothing budget.
+    Returns T (..., R, C) row-stochastic soft target (safe_log(T) embeds it as logits).
+    """
+    if cutoff is None:
+        cutoff = 3.0 * sigma
+    K = torch.exp(-D_x.pow(2) / (2.0 * sigma ** 2))
+    K = torch.where(D_x > cutoff, K.new_tensor(floor), K)
+    T = P0 @ K
+    return T / T.sum(-1, keepdim=True).clamp_min(eps)
+
+
 def cosine_alpha_bar(t: torch.Tensor, s: float = 0.008, logsnr_shift: float = 0.0) -> torch.Tensor:
     """Cosine VP schedule ᾱ(t) (Nichol & Dhariwal). t in [0, 1]: ᾱ(0)=1 (clean), ᾱ(1)=0.
 
