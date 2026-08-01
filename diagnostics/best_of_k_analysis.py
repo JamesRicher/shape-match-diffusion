@@ -1,7 +1,7 @@
 """ISOLATED, DELETE-SAFE DIAGNOSTIC -- best-of-K with the FROZEN selector + multimodality readout.
 
 One self-contained pipeline that, for each test pair, draws K diffusion samples, densifies each,
-and reports three things:
+and reports two things:
 
   1. IMPROVED BEST-OF-K.  The deployable number: dense MGE of the frozen unsupervised selector
      (combined = w_iso*z(isometry) + (1-w_iso)*z(coverage), cycle dropped), reported next to
@@ -16,24 +16,15 @@ and reports three things:
      honest test of "is the correct answer actually a distinct mode among the K?" -- if pairs are
      unimodal (n_modes==1) the selector has nothing to select and the ceiling is low.
 
-  3. PER-VERTEX ENTROPY / DISPERSION for polyscope.  For the most-multimodal pairs it exports the
-     source (Y) mesh with two scalar fields over its vertices:
-       * dispersion -- mean pairwise geodesic distance on X between the K targets of that vertex,
-         normalised by X diameter (geometry-aware uncertainty; where do the samples disagree?).
-       * entropy    -- Shannon entropy of the K discrete targets, normalised by log K.
-     plus per-vertex geodesic error of the single / selector / oracle maps, so you can SEE where
-     selection rescues the shape. View with --view <pair_file.npz> (needs polyscope).
-
 Run in the `shapematch` env.
 
 USAGE (the decisive cross-dataset run, FAUST model on SCAPE data):
   python -m diagnostics.best_of_k_analysis \
       -c configs/joint_diffusionnet/scape_diffusionnet_512_FMD.yaml \
       --checkpoint experiments/diffusionnet/faust_diffusionnet_512_FMD/models/final.pth \
-      -K 32 --num-pairs 60 --eta 0.5 --split test --exclude-self --export-pairs 6
+      -K 32 --num-pairs 60 --eta 0.5 --split test --exclude-self
 
-Then inspect a multimodal pair in polyscope:
-  python -m diagnostics.best_of_k_analysis --view diagnostics/results/new/<name>/<tag>/polyscope/pair_XX.npz
+(--view <pair_file.npz> still opens any pair npz exported by an earlier version of this script.)
 
 Optional: --w-iso W (frozen selector weight), --mode-thresh F (cluster cut, frac of X diameter),
 --n-iso-pairs, --seed, --device.
@@ -78,15 +69,6 @@ def _per_vertex_err(dist_x, corr_x, corr_y, p2p):
     return calculate_geodesic_error(dist_x, corr_x, corr_y, p2p, return_mean=False)
 
 
-def _err_field(dist_x, corr_x, corr_y, p2p, n_y):
-    """Same error, but SCATTERED onto the full (n_y,) Y-vertex array via corr_y so it can be shown
-    as a polyscope scalar quantity. Unevaluated vertices (not GT points) are left 0."""
-    err = _per_vertex_err(dist_x, corr_x, corr_y, p2p)
-    field = np.zeros(n_y)
-    field[corr_y] = err
-    return field
-
-
 # --------------------------------------------------------------------------- #
 # multimodality: cluster the K maps, per-vertex geometric dispersion
 # --------------------------------------------------------------------------- #
@@ -126,26 +108,12 @@ def _cluster_modes(D, thresh):
     return int(labels.max()), float(counts.max() / K), labels
 
 
-def _vertex_entropy(maps):
-    """Normalised Shannon entropy in [0,1] of the K discrete targets, per Y vertex (0 = all agree)."""
-    K, n_y = maps.shape
-    if K < 2:
-        return np.zeros(n_y)
-    ent = np.empty(n_y)
-    logK = np.log(K)
-    for i in range(n_y):
-        _, c = np.unique(maps[:, i], return_counts=True)
-        p = c / K
-        ent[i] = float(-(p * np.log(p)).sum() / logK)
-    return ent
-
-
 # --------------------------------------------------------------------------- #
 # main run
 # --------------------------------------------------------------------------- #
 @torch.no_grad()
 def run(cfg, checkpoint, device, K, num_pairs, seed, eta, w_iso, n_iso_pairs,
-        mode_thresh, split, exclude_self, export_pairs):
+        mode_thresh, split, exclude_self):
     model, dataset, opt, ckpt = _build(cfg, checkpoint, device, 'config',
                                        split=split, exclude_self=exclude_self)
     name = opt['name']
@@ -157,13 +125,11 @@ def run(cfg, checkpoint, device, K, num_pairs, seed, eta, w_iso, n_iso_pairs,
     eta_tag = '' if eta == 0.0 else f'_eta{eta:g}'
     tag = f'analysis_{ckpt_stem}_{split}_K{K}{eta_tag}_w{w_iso:g}'
     out_dir = os.path.join(_OUT_ROOT, name, tag)
-    ps_dir = os.path.join(out_dir, 'polyscope')
-    os.makedirs(ps_dir, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
 
     # per-pair accumulators
     rows = {k: [] for k in ['feature_nn', 'single', 'selector', 'oracle', 'worst']}
     n_modes, occ, mean_disp = [], [], []
-    export_cache = []                                                 # per-pair heavy payload, pruned later
 
     for pi in tqdm(idxs, desc=f'{name} best-of-{K} analysis eta={eta}'):
         data = dataset[pi]
@@ -194,16 +160,6 @@ def run(cfg, checkpoint, device, K, num_pairs, seed, eta, w_iso, n_iso_pairs,
         nm, oc, _ = _cluster_modes(D, mode_thresh)
         n_modes.append(nm); occ.append(oc); mean_disp.append(float(disp.mean()))
 
-        # keep the heaviest per-vertex payload only for the pairs we will export
-        export_cache.append((pi, nm, float(disp.mean()), dict(
-            y_verts=to_numpy(y['verts']), y_faces=to_numpy(y['faces']),
-            x_verts=to_numpy(x['verts']), x_faces=to_numpy(x['faces']),
-            dispersion=disp, maps=maps, mge=mge, pick=pick, best=best,
-            single_map=maps[0], selector_map=maps[pick], oracle_map=maps[best],
-            err_single=_err_field(dist_x, corr_x, corr_y, maps[0], maps.shape[1]),
-            err_selector=_err_field(dist_x, corr_x, corr_y, maps[pick], maps.shape[1]),
-            err_oracle=_err_field(dist_x, corr_x, corr_y, maps[best], maps.shape[1]))))
-
     rows = {k: np.asarray(v) for k, v in rows.items()}
     n_modes = np.asarray(n_modes); occ = np.asarray(occ); mean_disp = np.asarray(mean_disp)
     single_m, oracle_m = rows['single'].mean(), rows['oracle'].mean()
@@ -226,18 +182,6 @@ def run(cfg, checkpoint, device, K, num_pairs, seed, eta, w_iso, n_iso_pairs,
             'mean_vertex_dispersion': float(mean_disp.mean())},
     }
 
-    # ---- export the most-multimodal pairs for polyscope --------------------- #
-    exported = []
-    if export_pairs:
-        order = sorted(export_cache, key=lambda t: (t[1], t[2]), reverse=True)[:export_pairs]
-        for pi, nm, md, payload in order:
-            f = os.path.join(ps_dir, f'pair_{pi:03d}.npz')
-            np.savez(f, pair_idx=pi, n_modes=nm,
-                     entropy=_vertex_entropy(payload['maps']), **payload)
-            exported.append({'pair_idx': pi, 'n_modes': int(nm), 'file': f})
-    summary['exported_pairs'] = exported
-
-    os.makedirs(out_dir, exist_ok=True)
     np.savez(os.path.join(out_dir, 'per_pair.npz'), idxs=idxs, n_modes=n_modes, occupancy=occ,
              mean_dispersion=mean_disp, **rows)
     with open(os.path.join(out_dir, 'summary.json'), 'w') as fh:
@@ -305,10 +249,6 @@ def _print(s):
           f"frac multimodal(>1)={m['frac_multimodal']*100:.0f}%  "
           f"median dominant occ={m['median_dominant_occupancy']*100:.0f}%  "
           f"mean vertex dispersion={m['mean_vertex_dispersion']:.3f}")
-    if s['exported_pairs']:
-        print("\nexported for polyscope (most multimodal):")
-        for e in s['exported_pairs']:
-            print(f"  pair {e['pair_idx']:>3}  n_modes={e['n_modes']}  -> {e['file']}")
     print(f"\nhistograms: {os.path.join(s['out_dir'], 'histograms.png')}")
     print(f"summary:    {os.path.join(s['out_dir'], 'summary.json')}")
 
@@ -356,7 +296,6 @@ def main():
     p.add_argument('--n-iso-pairs', type=int, default=2000, help='long-range Y pairs for the isometry score')
     p.add_argument('--mode-thresh', type=float, default=0.05,
                    help='cluster cut for mode counting (frac of X diameter map-disagreement)')
-    p.add_argument('--export-pairs', type=int, default=6, help='most-multimodal pairs to dump for polyscope')
     p.add_argument('--split', default='test', choices=['train', 'val', 'test'])
     p.add_argument('--exclude-self', action='store_true', help='drop identity self-pairs')
     p.add_argument('--seed', type=int, default=0)
@@ -370,7 +309,7 @@ def main():
         p.error('-c/--config is required unless --view is used')
     s = run(args.config, args.checkpoint, args.device, args.K, args.num_pairs, args.seed,
             args.eta, args.w_iso, args.n_iso_pairs, args.mode_thresh, args.split,
-            args.exclude_self, args.export_pairs)
+            args.exclude_self)
     _print(s)
 
 
