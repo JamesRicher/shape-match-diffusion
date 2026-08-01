@@ -50,6 +50,20 @@ class MatrixDiffusionModel(BaseModel):
         # wanted later, enables classifier-free guidance at sampling. Eval/diagnostics (is_train
         # False after eval()) never drop. See reverse-trajectory-inert / loss-vs-t memories.
         self.feature_dropout = cfg.get('feature_dropout', 0.0)
+        # train-time t sampler (diagnostics/loss_vs_t_draws.py): under uniform t most steps
+        # draw a near-zero loss -- with features present the loss is ~0 at EVERY t, and even
+        # feature-dropped steps are ~0 below t~0.4. A `t_sampler` block restricts each train
+        # step's t to the measured work band of its conditioning regime (deliberate
+        # reweighting of E_t[L(t)], no importance correction: the low-t loss is tautological,
+        # P_t already contains the answer). `uniform_frac` of steps keep t ~ U[0,1] so the
+        # near-clean regime the reverse sampler visits at inference never atrophies.
+        # None (default) = plain t ~ U[0,1].
+        ts = cfg.get('t_sampler')
+        self.t_sampler = None if ts is None else {
+            't_min_drop': ts.get('t_min_drop', 0.35),   # band floor for feature-dropped steps
+            't_min_feat': ts.get('t_min_feat', 0.6),    # band floor for features-on steps
+            'uniform_frac': ts.get('uniform_frac', 0.1),
+        }
 
         # optional map densifier (sparse p2p -> dense whole-shape p2p). A non-learned
         # post-process kept out of the loss (steps.md Step 3); None => sparse-only. The
@@ -77,11 +91,13 @@ class MatrixDiffusionModel(BaseModel):
     # ------------------------------------------------------------------ #
     # helpers
     # ------------------------------------------------------------------ #
-    def _sparse_inputs(self, data):
+    def _sparse_inputs(self, data, drop_features=False):
         """Pull the sparse tokens, add a batch dim, move to device.
         Returns F_x, F_y (B,n,d_f); D_x, D_y (B,n,n); P0 (B,n_y,n_x) or None.
         P0 is None under independent-FPS eval (no bijective sparse GT); sampling paths
-        ignore it, and the training/diagnostic paths that need it always have gt_perm."""
+        ignore it, and the training/diagnostic paths that need it always have gt_perm.
+        drop_features zeros the feature block (the CFG conditioning-dropout regime); the
+        per-step coin lives in feed_data so the t sampler can condition on the outcome."""
         dx, dy = data['first'], data['second']
         xs, ys = dx['sparse'], dy['sparse']
         b = lambda z: (z.unsqueeze(0) if z.dim() == 2 else z).to(self.device).float()
@@ -96,10 +112,7 @@ class MatrixDiffusionModel(BaseModel):
                 F_y = ext.extract(dy['verts'], dy['dist'], ys['idx'])
         else:                                                       # frozen .npy features
             F_x, F_y = b(xs['feat']), b(ys['feat'])
-        if self.ablate_features:                                    # P_t-only diagnostic (always on)
-            F_x, F_y = torch.zeros_like(F_x), torch.zeros_like(F_y)
-        elif self.is_train and self.feature_dropout > 0.0 \
-                and torch.rand(1).item() < self.feature_dropout:    # CFG conditioning dropout
+        if self.ablate_features or drop_features:                   # P_t-only ablation / CFG dropout
             F_x, F_y = torch.zeros_like(F_x), torch.zeros_like(F_y)
         gt = data.get('gt_perm')
         P0 = b(gt) if gt is not None else None
@@ -126,10 +139,23 @@ class MatrixDiffusionModel(BaseModel):
     # ------------------------------------------------------------------ #
     # training step
     # ------------------------------------------------------------------ #
+    def _sample_t(self, B, dropped):
+        """Continuous train-time t. Uniform on [0,1] without a t_sampler; otherwise banded
+        to the regime's work band (see __init__), with a uniform_frac full-range floor."""
+        u = torch.rand(B, device=self.device)
+        if self.t_sampler is None:
+            return u
+        t_min = self.t_sampler['t_min_drop' if dropped else 't_min_feat']
+        floor = torch.rand(B, device=self.device) < self.t_sampler['uniform_frac']
+        lo = torch.where(floor, 0.0, t_min)
+        return lo + (1.0 - lo) * u
+
     def feed_data(self, data):
-        F_x, F_y, D_x, D_y, P0 = self._sparse_inputs(data)
+        drop = self.is_train and self.feature_dropout > 0.0 \
+                and torch.rand(1).item() < self.feature_dropout    # CFG conditioning dropout
+        F_x, F_y, D_x, D_y, P0 = self._sparse_inputs(data, drop_features=drop)
         u0 = logit_target(P0, self.eta)                            # clean logits
-        t = torch.rand(P0.shape[0], device=self.device)           # continuous t ~ U[0,1]
+        t = self._sample_t(P0.shape[0], drop)
         loss, logP = self._forward_ce(F_x, F_y, D_x, D_y, P0, u0, t)
         self.loss_metrics = OrderedDict(l_ce=loss)
         self.P0_hat = logP.exp().detach()
