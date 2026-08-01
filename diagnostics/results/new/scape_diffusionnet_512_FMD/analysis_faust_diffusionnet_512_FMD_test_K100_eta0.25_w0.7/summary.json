@@ -1,0 +1,78 @@
+{
+  "name": "scape_diffusionnet_512_FMD",
+  "checkpoint": "experiments/diffusionnet/faust_diffusionnet_512_FMD/models/final.pth",
+  "K": 100,
+  "eta": 0.25,
+  "w_iso": 0.7,
+  "split": "test",
+  "n_pairs": 380,
+  "mode_thresh": 0.05,
+  "feature_nn": {
+    "dense_MGE": 0.0578387975692749,
+    "median": 0.02878411114215851,
+    "gross_gt_0.1": 0.1868421052631579,
+    "oracle_recovery": -0.12144395975359205
+  },
+  "single": {
+    "dense_MGE": 0.05600426115683819,
+    "median": 0.029074912890791893,
+    "gross_gt_0.1": 0.17894736842105263,
+    "oracle_recovery": 0.0
+  },
+  "selector": {
+    "dense_MGE": 0.04999346010583012,
+    "median": 0.02827497571706772,
+    "gross_gt_0.1": 0.13157894736842105,
+    "oracle_recovery": 0.39790732741896695
+  },
+  "oracle": {
+    "dense_MGE": 0.040898228578857686,
+    "median": 0.02694560121744871,
+    "gross_gt_0.1": 0.08421052631578947,
+    "oracle_recovery": 1.0
+  },
+  "worst": {
+    "dense_MGE": 0.07768459730340461,
+    "median": 0.0321417935192585,
+    "gross_gt_0.1": 0.30526315789473685,
+    "oracle_recovery": -1.435210472018248
+  },
+  "multimodality": {
+    "mean_n_modes": 7.2105263157894735,
+    "frac_multimodal": 0.2894736842105263,
+    "median_dominant_occupancy": 1.0,
+    "mean_vertex_dispersion": 0.021346419402260598
+  },
+  "exported_pairs": [
+    {
+      "pair_idx": 5,
+      "n_modes": 100,
+      "file": "/data2/home/jrr25/Documents/shape-match-diffusion/diagnostics/results/new/scape_diffusionnet_512_FMD/analysis_faust_diffusionnet_512_FMD_test_K100_eta0.25_w0.7/polyscope/pair_005.npz"
+    },
+    {
+      "pair_idx": 1,
+      "n_modes": 100,
+      "file": "/data2/home/jrr25/Documents/shape-match-diffusion/diagnostics/results/new/scape_diffusionnet_512_FMD/analysis_faust_diffusionnet_512_FMD_test_K100_eta0.25_w0.7/polyscope/pair_001.npz"
+    },
+    {
+      "pair_idx": 2,
+      "n_modes": 100,
+      "file": "/data2/home/jrr25/Documents/shape-match-diffusion/diagnostics/results/new/scape_diffusionnet_512_FMD/analysis_faust_diffusionnet_512_FMD_test_K100_eta0.25_w0.7/polyscope/pair_002.npz"
+    },
+    {
+      "pair_idx": 9,
+      "n_modes": 98,
+      "file": "/data2/home/jrr25/Documents/shape-match-diffusion/diagnostics/results/new/scape_diffusionnet_512_FMD/analysis_faust_diffusionnet_512_FMD_test_K100_eta0.25_w0.7/polyscope/pair_009.npz"
+    },
+    {
+      "pair_idx": 114,
+      "n_modes": 96,
+      "file": "/data2/home/jrr25/Documents/shape-match-diffusion/diagnostics/results/new/scape_diffusionnet_512_FMD/analysis_faust_diffusionnet_512_FMD_test_K100_eta0.25_w0.7/polyscope/pair_114.npz"
+    },
+    {
+      "pair_idx": 0,
+      "n_modes": 95,
+      "file": "/data2/home/jrr25/Documents/shape-match-diffusion/diagnostics/results/new/scape_diffusionnet_512_FMD/analysis_faust_diffusionnet_512_FMD_test_K100_eta0.25_w0.7/polyscope/pair_000.npz"
+    }
+  ]
+}
