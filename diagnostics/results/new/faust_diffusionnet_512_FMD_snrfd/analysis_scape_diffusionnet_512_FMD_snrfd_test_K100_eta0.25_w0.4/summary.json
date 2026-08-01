@@ -1,0 +1,46 @@
+{
+  "name": "faust_diffusionnet_512_FMD_snrfd",
+  "checkpoint": "experiments/diffusionnet/scape_diffusionnet_512_FMD_snrfd/models/final.pth",
+  "K": 100,
+  "eta": 0.25,
+  "w_iso": 0.4,
+  "split": "test",
+  "n_pairs": 380,
+  "mode_thresh": 0.05,
+  "feature_nn": {
+    "dense_MGE": 0.019354797899723053,
+    "median": 0.019347768276929855,
+    "gross_gt_0.1": 0.0,
+    "oracle_recovery": 0.48925398321471114
+  },
+  "single": {
+    "dense_MGE": 0.020434756403004652,
+    "median": 0.020324230194091797,
+    "gross_gt_0.1": 0.0,
+    "oracle_recovery": 0.0
+  },
+  "selector": {
+    "dense_MGE": 0.019646946068755104,
+    "median": 0.019807700999081135,
+    "gross_gt_0.1": 0.0,
+    "oracle_recovery": 0.35690199473229295
+  },
+  "oracle": {
+    "dense_MGE": 0.018227398792575848,
+    "median": 0.017929510213434696,
+    "gross_gt_0.1": 0.0,
+    "oracle_recovery": 1.0
+  },
+  "worst": {
+    "dense_MGE": 0.025303081138745735,
+    "median": 0.02539925929158926,
+    "gross_gt_0.1": 0.0,
+    "oracle_recovery": -2.2054988791758823
+  },
+  "multimodality": {
+    "mean_n_modes": 1.0,
+    "frac_multimodal": 0.0,
+    "median_dominant_occupancy": 1.0,
+    "mean_vertex_dispersion": 0.00589967766517029
+  }
+}
