@@ -1,0 +1,25 @@
+{
+  "name": "faust_diffusionnet_512_FMD_snrfd",
+  "eval_tag": "FAUST_r_featzero",
+  "checkpoint": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/diffusionnet/faust_diffusionnet_512_FMD_snrfd/models/final.pth",
+  "dataset": {
+    "name": "Faust_r",
+    "type": "SparsePairFaustDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "euclidean"
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.23235559463500977,
+  "auc": 0.4691955183413078,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.0705827996134758,
+  "sparse_acc": 0.31451994243421055,
+  "sparse_auc": 0.5452690453050238,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}

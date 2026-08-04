@@ -99,7 +99,8 @@ class SingleShapeDataset(Dataset):
                  ret_corr: bool=True,
                  ret_dist: bool=True,
                  ret_evecs: bool=False,
-                 num_evecs: int=200):
+                 num_evecs: int=200,
+                 feats_dir: str='feats'):
         super().__init__()
         assert os.path.isdir(data_root), f"Invalid data root for SingleShapeDataset: {data_root}"
 
@@ -107,6 +108,7 @@ class SingleShapeDataset(Dataset):
         self.data_root = data_root
         self.ret_faces = ret_faces
         self.ret_feats = ret_feats
+        self.feats_dir = feats_dir     # subdir of data_root holding the frozen feature .npy files
         self.ret_corr = ret_corr
         self.ret_dist = ret_dist
         self.ret_evecs = ret_evecs
@@ -157,7 +159,7 @@ class SingleShapeDataset(Dataset):
             self.corr_files = sort_list(glob(f'{corr_path}/*.vts'))
 
         if self.ret_feats:
-            feat_path = os.path.join(self.data_root, 'feats')
+            feat_path = os.path.join(self.data_root, self.feats_dir)
             assert os.path.isdir(feat_path), f"Inavlid path {feat_path} not containing .npy files"
             self.feat_files = sort_list(glob(f'{feat_path}/*.npy'))
     

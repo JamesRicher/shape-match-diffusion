@@ -26,8 +26,9 @@ class SingleFaustDataset(SingleShapeDataset):
                  ret_corr=True,
                  ret_dist=True,
                  ret_evecs=False,
-                 num_evecs=200):
-        super().__init__(data_root, ret_faces, ret_feats, ret_corr, ret_dist, ret_evecs, num_evecs)
+                 num_evecs=200,
+                 feats_dir='feats'):
+        super().__init__(data_root, ret_faces, ret_feats, ret_corr, ret_dist, ret_evecs, num_evecs, feats_dir)
         assert phase in ['train', 'test', 'full'], f'Invalid phase {phase}, only "train" or "test" or "full"'
         assert len(self) == 100, f'FAUST dataset should contain 100 human body shapes, but get {len(self)}.'
         if phase == 'train':
@@ -107,8 +108,9 @@ class SingleScapeDataset(SingleShapeDataset):
                  ret_corr=True,
                  ret_dist=True,
                  ret_evecs=False,
-                 num_evecs=200):
-        super(SingleScapeDataset, self).__init__(data_root, ret_faces, ret_feats, ret_corr, ret_dist, ret_evecs, num_evecs)
+                 num_evecs=200,
+                 feats_dir='feats'):
+        super(SingleScapeDataset, self).__init__(data_root, ret_faces, ret_feats, ret_corr, ret_dist, ret_evecs, num_evecs, feats_dir)
         assert phase in ['train', 'test', 'full'], f'Invalid phase {phase}, only "train" or "test" or "full"'
         assert len(self) == 71, f'FAUST dataset should contain 71 human body shapes, but get {len(self)}.'
         if phase == 'train':
@@ -159,10 +161,11 @@ class SparsePairFaustDataset(SparsePairShapeDataset):
                  ret_evecs=False,
                  num_evecs=200,
                  exclude_self=False,
-                 fps_metric="geodesic"):
+                 fps_metric="geodesic",
+                 feats_dir='feats'):
         dataset = SingleFaustDataset(data_root, phase, ret_faces=True, ret_feats=True,
                                      ret_corr=True, ret_dist=True, ret_evecs=ret_evecs,
-                                     num_evecs=num_evecs)
+                                     num_evecs=num_evecs, feats_dir=feats_dir)
         super().__init__(dataset, n_sparse=n_sparse, phase=phase, exclude_self=exclude_self,
                          fps_metric=fps_metric)
 
@@ -465,9 +468,10 @@ class SparsePairScapeDataset(SparsePairShapeDataset):
                  ret_evecs=False,
                  num_evecs=200,
                  exclude_self=False,
-                 fps_metric="geodesic"):
+                 fps_metric="geodesic",
+                 feats_dir='feats'):
         dataset = SingleScapeDataset(data_root, phase, ret_faces=True, ret_feats=True,
                                      ret_corr=True, ret_dist=True, ret_evecs=ret_evecs,
-                                     num_evecs=num_evecs)
+                                     num_evecs=num_evecs, feats_dir=feats_dir)
         super().__init__(dataset, n_sparse=n_sparse, phase=phase, exclude_self=exclude_self,
                          fps_metric=fps_metric)
