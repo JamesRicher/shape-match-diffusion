@@ -1,0 +1,21 @@
+{
+  "name": "smal_diffusionnet_512_FMD_xyz_snrfd_tw_gt",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/diffusionnet/smal_diffusionnet_512_FMD_xyz_snrfd_tw_gt/models/final.pth",
+  "n_pairs": 380,
+  "fps_metric": "euclidean",
+  "feat_source": "diffnet",
+  "degradation": null,
+  "nn_baseline": {
+    "dense_MGE": 0.08707483857870102,
+    "median": 0.03389642760157585,
+    "p90": 0.1192779392004013,
+    "gross_gt_0.1": 0.12028528508208036
+  },
+  "hungarian": {
+    "dense_MGE": 0.06910482048988342,
+    "median": 0.033432960510253906,
+    "p90": 0.09743277728557587,
+    "gross_gt_0.1": 0.09587297505785548
+  },
+  "out_dir": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/diffusionnet/smal_diffusionnet_512_FMD_xyz_snrfd_tw_gt/results/benchmarks/smal_diffusionnet_512_FMD_xyz_snrfd_tw_gt"
+}
