@@ -147,6 +147,34 @@ def gaussian_target(
     return T / T.sum(-1, keepdim=True).clamp_min(eps)
 
 
+def gaussian_target_from_dist(
+    D_cross: torch.Tensor,
+    sigma: float,
+    cutoff: Optional[float] = None,
+    floor: float = 2e-4,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """Geodesic soft target for INDEPENDENT (non-corresponding) sparse points: row j ∝
+    exp(-D_cross[j,·]² / 2σ²), floored past cutoff.
+
+    The independent-FPS analogue of :func:`gaussian_target`. There is no P0 permutation to
+    select a kernel row, because the query's GT image need not coincide with any source anchor;
+    instead D_cross[j, i] = geodesic(GT image of query j, source anchor i) in the SOURCE shape's
+    metric is precomputed (dataset side), and the kernel is evaluated on it directly. Same
+    kernel, sigma, cutoff and floor semantics as gaussian_target, so losses stay comparable.
+
+    Args:
+        D_cross: (..., R, C) query-image -> source-anchor geodesic distances (sqrt-area units).
+        sigma, cutoff, floor: as in gaussian_target.
+    Returns T (..., R, C) row-stochastic soft target.
+    """
+    if cutoff is None:
+        cutoff = 3.0 * sigma
+    K = torch.exp(-D_cross.pow(2) / (2.0 * sigma ** 2))
+    K = torch.where(D_cross > cutoff, K.new_tensor(floor), K)
+    return K / K.sum(-1, keepdim=True).clamp_min(eps)
+
+
 def cosine_alpha_bar(t: torch.Tensor, s: float = 0.008, logsnr_shift: float = 0.0) -> torch.Tensor:
     """Cosine VP schedule ᾱ(t) (Nichol & Dhariwal). t in [0, 1]: ᾱ(0)=1 (clean), ᾱ(1)=0.
 

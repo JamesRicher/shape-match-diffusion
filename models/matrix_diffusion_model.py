@@ -19,8 +19,8 @@ from tqdm import tqdm
 
 from utils.registry import MODEL_REGISTRY
 from utils.logger import get_root_logger
-from utils.sinkhorn import (logit_target, gaussian_target, safe_log, q_sample,
-                            cosine_alpha_bar, log_sinkhorn)
+from utils.sinkhorn import (logit_target, gaussian_target, gaussian_target_from_dist,
+                            safe_log, q_sample, cosine_alpha_bar, log_sinkhorn)
 from densifiers import build_densifier, DensifyContext
 from metrics.geo_metric import calculate_geodesic_error, plot_pck
 from .base_model import BaseModel
@@ -155,15 +155,24 @@ class MatrixDiffusionModel(BaseModel):
     # ------------------------------------------------------------------ #
     # training step
     # ------------------------------------------------------------------ #
-    def _target(self, P0, D_x):
+    def _target(self, P0, D_x, D_cross=None):
         """Training target triple (P_ce, u0, H): CE weights, clean logits, entropy floor.
         onehot: hard-P0 CE + eta-smoothed logits (original behaviour), H = 0. gaussian:
         the geodesic soft target for both, H = its entropy — CE minus H is the KL to the
-        target, restoring a zero floor so losses stay comparable across targets/sigmas."""
+        target, restoring a zero floor so losses stay comparable across targets/sigmas.
+
+        D_cross (independent-FPS training, gaussian only): (n_y, n_x) query-image -> source-anchor
+        distances. When present, the soft target is built from it directly (no P0 permutation,
+        since the sparse sets do not correspond); P0 is None on these steps."""
         if self.target_type == 'gaussian':
-            T = gaussian_target(P0, D_x, self.target_sigma, self.target_cutoff, self.target_floor)
+            if D_cross is not None:
+                T = gaussian_target_from_dist(D_cross, self.target_sigma, self.target_cutoff,
+                                              self.target_floor)
+            else:
+                T = gaussian_target(P0, D_x, self.target_sigma, self.target_cutoff, self.target_floor)
             logT = safe_log(T)
             return T, logT, -(T * logT).sum(-1).mean()
+        assert D_cross is None, "independent-FPS training requires the gaussian target"
         return P0, logit_target(P0, self.eta), 0.0
 
     def _sample_t(self, B, dropped):
@@ -181,8 +190,11 @@ class MatrixDiffusionModel(BaseModel):
         drop = self.is_train and self.feature_dropout > 0.0 \
                 and torch.rand(1).item() < self.feature_dropout    # CFG conditioning dropout
         F_x, F_y, D_x, D_y, P0 = self._sparse_inputs(data, drop_features=drop)
-        P_ce, u0, H = self._target(P0, D_x)
-        t = self._sample_t(P0.shape[0], drop)
+        D_cross = data.get('gt_cross_dist')                 # independent-FPS training step
+        if D_cross is not None:
+            D_cross = (D_cross.unsqueeze(0) if D_cross.dim() == 2 else D_cross).to(self.device).float()
+        P_ce, u0, H = self._target(P0, D_x, D_cross)
+        t = self._sample_t((D_cross if D_cross is not None else P0).shape[0], drop)
         loss, logP = self._forward_ce(F_x, F_y, D_x, D_y, P_ce, u0, t)
         # H is constant w.r.t. parameters: same gradients, logged/optimized value is the KL
         self.loss_metrics = OrderedDict(l_ce=loss - H)

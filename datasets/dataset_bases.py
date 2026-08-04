@@ -292,7 +292,58 @@ class SparsePairShapeDataset(PairShapeDataset):
         self.n_sparse = n_sparse
         self.train = (phase == "train")
         self.independent_fps = False
+        # (A) covered-vertex honest-FPS training fraction. When >0, each train step is, with
+        # this probability, sampled with source and target FPS'd INDEPENDENTLY over their own
+        # GT-covered vertices (the test regime) instead of the bijective correspondence. The
+        # gaussian soft target still gets full signal because every query is covered. Set from
+        # config after construction (like independent_fps), so it never touches eval/val.
+        self.independent_train_prob = 0.0
         self.fps_metric = fps_metric        # 'geodesic' (intrinsic, pose-robust) or 'euclidean'
+
+    def _independent_train_item(self, item, x, y, index):
+        """(A) Honest independent-FPS training instance on the GT-covered vertices.
+
+        Source (X, keys) and target (Y, queries) are FPS'd independently -- separate random
+        starts, each spread on its OWN geometry -- so the two sparse sets do NOT correspond,
+        matching the test-time regime that bijective training never sees. Reusing
+        consistent_bijective_fps per shape only guarantees the n picks are distinct vertices;
+        the independence comes from the separate starts and separate geometries.
+
+        Unlike eval-only _independent_item this keeps full supervision: every query is a covered
+        vertex, so its GT image on X, corr_x[K_y], is known. The soft target is a geodesic
+        kernel centred on that image and evaluated at the (arbitrary) source anchors, so it needs
+        no query<->anchor coincidence -- carried downstream as gt_cross_dist rather than gt_perm.
+        """
+        corr_x = x['corr'].numpy()
+        corr_y = y['corr'].numpy()
+        T = corr_x.shape[0]
+        n = self.n_sparse
+        geo = (self.fps_metric == "geodesic")
+        dist_x = x['dist'].numpy() if geo else None
+        dist_y = y['dist'].numpy() if geo else None
+
+        # Independent starts -> the source and target anchor sets do not correspond.
+        start_x = int(np.random.randint(T)) if self.train else index % T
+        start_y = int(np.random.randint(T)) if self.train else (index * 7 + 1) % T
+        K_x = consistent_bijective_fps(x['verts'].numpy(), corr_x, corr_y, n, start_x, dist_x=dist_x)
+        K_y = consistent_bijective_fps(y['verts'].numpy(), corr_y, corr_x, n, start_y, dist_x=dist_y)
+
+        idx_x = torch.from_numpy(corr_x[K_x]).long()   # (n,) source anchors (keys) on X
+        idx_y = torch.from_numpy(corr_y[K_y]).long()   # (n,) target queries on Y
+        img_x = torch.from_numpy(corr_x[K_y]).long()   # (n,) GT image of each Y query on X
+
+        for shape, idx in ((x, idx_x), (y, idx_y)):
+            shape['sparse'] = {
+                'idx': idx,
+                'feat': shape['feat'][idx],
+                'verts': shape['verts'][idx],
+                'dist': shape['dist'][idx][:, idx],
+            }
+        # (n_y, n_x) geodesic distance from each query's GT image to each source anchor, in X's
+        # metric -- the soft-target support. No gt_perm: the sets are non-corresponding.
+        item['gt_cross_dist'] = x['dist'][img_x][:, idx_x].float()
+        item['fps_idx'] = torch.from_numpy(K_y).long()  # queries' template positions (cascade reuse)
+        return item
 
     def _independent_item(self, item, x, y):
         """FPS each shape on its own geometry (fixed start, deterministic). No gt_perm: the
@@ -323,6 +374,10 @@ class SparsePairShapeDataset(PairShapeDataset):
 
         if self.independent_fps:
             return self._independent_item(item, x, y)
+
+        if self.train and self.independent_train_prob > 0.0 \
+                and np.random.rand() < self.independent_train_prob:
+            return self._independent_train_item(item, x, y, index)
 
         corr_x = x['corr'].numpy()                 # (T,) template point -> vertex on X
         corr_y = y['corr'].numpy()

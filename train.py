@@ -188,6 +188,21 @@ def _maybe_subset(dataset, n):
     return Subset(dataset, indices)
 
 
+def _set_independent_train_prob(dataset, prob):
+    """Set independent_train_prob on a (possibly wrapped) train dataset. Recurses through
+    ConcatDataset (.datasets) and Subset (.dataset) so the flag reaches the leaf SparsePair
+    datasets. No-op on datasets that don't carry the attribute (non-sparse phases)."""
+    if not prob:
+        return
+    if isinstance(dataset, ConcatDataset):
+        for d in dataset.datasets:
+            _set_independent_train_prob(d, prob)
+    elif isinstance(dataset, Subset):
+        _set_independent_train_prob(dataset.dataset, prob)
+    elif hasattr(dataset, 'independent_train_prob'):
+        dataset.independent_train_prob = prob
+
+
 def _build_phase(spec):
     """Build one dataset, or a ConcatDataset when spec is a list of dataset dicts.
 
@@ -204,6 +219,12 @@ def _build_phase(spec):
 def build_dataloaders(opt, num_workers):
     train_set = _build_phase(opt['datasets']['train'])
     val_set = _build_phase(opt['datasets']['val'])
+
+    # (A) honest independent-FPS training: fraction of train steps sampled with source/target
+    # FPS'd independently over covered vertices (the test regime), instead of bijective FPS.
+    # Set as an attribute (like independent_fps) so no dataset constructor needs the kwarg, and
+    # it never reaches the val set. p=1.0 = full independent, p=0 (default) = today's behaviour.
+    _set_independent_train_prob(train_set, (opt.get('train') or {}).get('independent_train_prob', 0.0))
 
     # optional val subset (opt['val']['subset']): validation runs a sampler per pair, so
     # the full val set can be slow; a fixed subset keeps epoch-to-epoch numbers comparable.
