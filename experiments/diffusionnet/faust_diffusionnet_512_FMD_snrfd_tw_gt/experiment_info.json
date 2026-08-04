@@ -1,0 +1,148 @@
+{
+  "name": "faust_diffusionnet_512_FMD_snrfd_tw_gt",
+  "model_type": null,
+  "timestamp": "2026-08-04T10:06:26+00:00",
+  "git_commit": "30fe66f",
+  "device": "cuda",
+  "networks": {
+    "extractor": {
+      "class": "DiffusionNetExtractor",
+      "num_params": 479488,
+      "num_trainable": 479488
+    },
+    "denoiser": {
+      "class": "MatrixDenoiser",
+      "num_params": 3644209,
+      "num_trainable": 3644209
+    }
+  },
+  "config": {
+    "name": "faust_diffusionnet_512_FMD_snrfd_tw_gt",
+    "group": "diffusionnet",
+    "is_train": true,
+    "path": {
+      "resume_state": "extractor_experiments/diffusion_net/faust_diffusionnet_hks/models/best.pth",
+      "resume": false,
+      "experiment_root": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/diffusionnet/faust_diffusionnet_512_FMD_snrfd_tw_gt",
+      "models": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/diffusionnet/faust_diffusionnet_512_FMD_snrfd_tw_gt/models",
+      "results": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/diffusionnet/faust_diffusionnet_512_FMD_snrfd_tw_gt/results"
+    },
+    "datasets": {
+      "train": {
+        "name": "Faust_r",
+        "type": "SparsePairFaustDataset",
+        "phase": "train",
+        "n_sparse": 512,
+        "exclude_self": true,
+        "fps_metric": "euclidean",
+        "ret_evecs": true,
+        "num_evecs": 128
+      },
+      "val": {
+        "name": "Faust_r",
+        "type": "SparsePairFaustDataset",
+        "phase": "test",
+        "n_sparse": 512,
+        "exclude_self": true,
+        "fps_metric": "euclidean",
+        "ret_evecs": true,
+        "num_evecs": 128
+      },
+      "test": {
+        "name": "Faust_r",
+        "type": "SparsePairFaustDataset",
+        "phase": "test",
+        "n_sparse": 512,
+        "exclude_self": true,
+        "ret_evecs": true,
+        "num_evecs": 200,
+        "fps_metric": "euclidean"
+      }
+    },
+    "networks": {
+      "extractor": {
+        "type": "DiffusionNetExtractor",
+        "out_dim": 128,
+        "input_type": "hks",
+        "hidden": 128,
+        "n_block": 4,
+        "k_eig": 128,
+        "hks_count": 16
+      },
+      "denoiser": {
+        "type": "MatrixDenoiser",
+        "feat_dim": 128,
+        "dim": 128,
+        "heads": 4,
+        "depth": 6,
+        "n_anchors": 16,
+        "dropout": 0.0
+      }
+    },
+    "diffusion": {
+      "eta": 0.1,
+      "proj_iters": 6,
+      "schedule_s": 0.008,
+      "logsnr_shift": 0.0,
+      "feature_dropout": 0.5,
+      "t_sampler": {
+        "t_min_drop": 0.35,
+        "t_min_feat": 0.6,
+        "uniform_frac": 0.1
+      },
+      "target": {
+        "type": "gaussian",
+        "sigma": 0.03,
+        "cutoff": 0.09,
+        "floor": 0.0002
+      },
+      "sample_steps": 50,
+      "final_iters": 20
+    },
+    "densifier": {
+      "type": "FunctionalMapDensifier",
+      "feat_source": "diffnet",
+      "k_fm": 120,
+      "n_e": 100,
+      "lm_bands": 20,
+      "lm_weight": 5.0,
+      "mu": 0.1,
+      "variance": 7.0
+    },
+    "eval": {
+      "sparse": true,
+      "dense": false
+    },
+    "train": {
+      "total_epochs": 30,
+      "log_freq": 20,
+      "optims": {
+        "extractor": {
+          "type": "AdamW",
+          "lr": 0.0001,
+          "weight_decay": 0.0001
+        },
+        "denoiser": {
+          "type": "AdamW",
+          "lr": 0.001,
+          "weight_decay": 0.0001
+        }
+      },
+      "schedulers": {
+        "extractor": {
+          "type": "CosineAnnealingLR",
+          "eta_min": 1e-05,
+          "T_max": 30
+        },
+        "denoiser": {
+          "type": "CosineAnnealingLR",
+          "eta_min": 0.0001,
+          "T_max": 30
+        }
+      }
+    },
+    "val": {
+      "subset": 40
+    }
+  }
+}
