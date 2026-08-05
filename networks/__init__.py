@@ -6,6 +6,7 @@ import networks.shape_matching_transformer
 import networks.matrix_denoiser
 import networks.gcn_feature_extractor
 import networks.diffusion_net
+import networks.mpnn.denoiser
 
 __all__ = ["build_network"]
 

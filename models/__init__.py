@@ -4,6 +4,7 @@ from utils.registry import MODEL_REGISTRY
 # make the registry decorators run
 import models.shape_matching_model
 import models.matrix_diffusion_model
+import models.mpnn_diffusion_model
 
 __all__ = ["build_model"]
 

@@ -1,0 +1,101 @@
+{
+  "name": "mpnn_diffusion_overfit_attn",
+  "model_type": null,
+  "timestamp": "2026-08-05T10:39:51+00:00",
+  "git_commit": "45aa588",
+  "device": "cpu",
+  "networks": {
+    "denoiser": {
+      "class": "MPNNMatrixDenoiser",
+      "num_params": 3622942,
+      "num_trainable": 3622942
+    }
+  },
+  "config": {
+    "name": "mpnn_diffusion_overfit_attn",
+    "group": "mpnn_diffusion",
+    "is_train": true,
+    "datasets": {
+      "train": {
+        "name": "Faust_r",
+        "type": "SparsePairFaustDataset",
+        "phase": "test",
+        "n_sparse": 256,
+        "exclude_self": true
+      },
+      "val": {
+        "name": "Faust_r",
+        "type": "SparsePairFaustDataset",
+        "phase": "test",
+        "n_sparse": 256,
+        "exclude_self": true
+      },
+      "test": {
+        "name": "Faust_r",
+        "type": "SparsePairFaustDataset",
+        "phase": "test",
+        "n_sparse": 256,
+        "exclude_self": true
+      }
+    },
+    "networks": {
+      "denoiser": {
+        "type": "MPNNMatrixDenoiser",
+        "feat_dim": 256,
+        "dim": 128,
+        "depth": 5,
+        "heads": 4,
+        "cross_type": "attn",
+        "k_intra": 12,
+        "k_feat": 10,
+        "k_state": 10,
+        "n_rbf": 16,
+        "inner_iters": 3,
+        "dropout": 0.0
+      }
+    },
+    "diffusion": {
+      "eta": 0.1,
+      "proj_iters": 6,
+      "schedule_s": 0.008,
+      "sample_steps": 50,
+      "final_iters": 20
+    },
+    "diagnostics": {
+      "loss_vs_t": true,
+      "divergence": true,
+      "bins": 10,
+      "repeats": 16,
+      "samples": 8
+    },
+    "train": {
+      "total_epochs": 3,
+      "log_freq": 50,
+      "subset": 1,
+      "repeat": 500,
+      "optims": {
+        "denoiser": {
+          "type": "AdamW",
+          "lr": 0.001,
+          "weight_decay": 0.0
+        }
+      },
+      "schedulers": {
+        "denoiser": {
+          "type": "CosineAnnealingLR",
+          "eta_min": 0.0001,
+          "T_max": 3
+        }
+      }
+    },
+    "val": {
+      "subset": 1
+    },
+    "path": {
+      "experiment_root": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/mpnn_diffusion/mpnn_diffusion_overfit_attn",
+      "models": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/mpnn_diffusion/mpnn_diffusion_overfit_attn/models",
+      "results": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/mpnn_diffusion/mpnn_diffusion_overfit_attn/results",
+      "resume_state": null
+    }
+  }
+}
