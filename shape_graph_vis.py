@@ -44,6 +44,10 @@ def main():
     p.add_argument("--n-sparse", type=int, default=512, help="number of FPS points")
     p.add_argument("--k", type=int, default=6, help="neighbours per point in the geodesic kNN graph")
     p.add_argument("--start", type=int, default=0, help="FPS start vertex")
+    p.add_argument("--flip", dest="flip", action="store_true", default=None,
+                   help="rotate 180 deg about x for display (default: on for SMAL)")
+    p.add_argument("--no-flip", dest="flip", action="store_false",
+                   help="disable the display flip")
     args = p.parse_args()
 
     root = DATASETS[args.dataset]
@@ -55,22 +59,39 @@ def main():
     verts, faces = load_off(off_file)
     verts = verts.astype(np.float32)
     faces = faces.astype(np.int64)
+
+    flip = args.dataset == "smal" if args.flip is None else args.flip
+    if flip:                                                   # 180 deg about x: (x,-y,-z), keeps winding
+        verts = verts * np.array([1.0, -1.0, -1.0], dtype=np.float32)
     dist = load_dist(dist_path(root, off_file))                # (V, V) geodesic
 
     n = min(args.n_sparse, verts.shape[0])
     sel = fps(verts, n, args.start, dist=dist)                 # geodesic FPS (repo default)
     dist_sub = dist[sel][:, sel]
-    edges = knn_edges(dist_sub, args.k)
-    print(f"sampled {n} points, {len(edges)} edges")
 
     import polyscope as ps
+    import polyscope.imgui as psim
     ps.init()
     ps.register_surface_mesh("mesh", verts, faces, enabled=True,
                              color=(0.85, 0.85, 0.9), transparency=0.5)
-    graph = ps.register_curve_network("shape_graph", verts[sel], edges,
-                                      color=(0.9, 0.2, 0.2), radius=0.0015)
-    graph.add_scalar_quantity("fps_order", np.arange(n), enabled=True)
     ps.register_point_cloud("sparse_points", verts[sel], color=(0.1, 0.3, 0.9), radius=0.004)
+
+    def rebuild(k):
+        edges = knn_edges(dist_sub, k)
+        graph = ps.register_curve_network("shape_graph", verts[sel], edges,
+                                          color=(0.9, 0.2, 0.2), radius=0.0015)
+        graph.add_scalar_quantity("fps_order", np.arange(n), enabled=True)
+        print(f"k={k}: sampled {n} points, {len(edges)} edges")
+
+    state = {"k": min(args.k, n - 1)}
+    rebuild(state["k"])
+
+    def callback():
+        changed, state["k"] = psim.SliderInt("k (neighbours)", state["k"], 1, min(30, n - 1))
+        if changed:
+            rebuild(state["k"])
+
+    ps.set_user_callback(callback)
     ps.show()
 
 
