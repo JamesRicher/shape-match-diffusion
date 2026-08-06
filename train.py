@@ -333,6 +333,11 @@ def train(opt, args):
 
 def main():
     args = parse_args()
+    # TF32 matmuls: ~2.4x faster on Ampere+/Ada (e.g. L40S, CC 8.9) at ~10-bit mantissa —
+    # a free win for the matmul-bound parts (MLPs, attention, bilinear). No effect on the
+    # logsumexp / Sinkhorn reductions (not matmuls), so the log-space diffusion stays stable.
+    # No-op on pre-Ampere GPUs / CPU.
+    torch.set_float32_matmul_precision('high')
     opt = build_opt(args)
     seed = opt.get('seed')
     if seed is not None:
