@@ -98,6 +98,9 @@ def evaluate(ext, dataset, loss_fn, limit=None):
 
 
 def main():
+    # TF32 matmuls, as in train.py: DiffusionNet's spectral blocks are dense evec matmuls,
+    # so the pretrainer is matmul-bound too. No-op on pre-Ampere GPUs / CPU.
+    torch.set_float32_matmul_precision('high')
     p = argparse.ArgumentParser()
     p.add_argument('-c', '--config', default=DEFAULT_CONFIG, help='debug FE config (yaml)')
     p.add_argument('--name', default=None, help='override run name (run dir under runs/)')
