@@ -50,6 +50,14 @@ def build_opt(args):
         if sched_cfg.get('type') == 'CosineAnnealingLR':
             sched_cfg['T_max'] = total_epochs
 
+    # Independent-FPS validation is the inference regime: the two sparse sets are sampled without
+    # GT, so there is no gt_perm and the sparse diagonal error/acc are undefined. Report dense MGE
+    # via the configured densifier instead -- exactly the honest pass evaluate.py runs. Forced here
+    # (before build_model reads opt['eval']) so a config can't ask for the impossible combination;
+    # the model raises a clear error if no densifier is configured.
+    if (opt.get('val') or {}).get('independent_fps'):
+        opt['eval'] = {**(opt.get('eval') or {}), 'sparse': False, 'dense': True}
+
     # resolve experiment output paths (models/ results/) from the name
     resolve_experiment_paths(opt)
     path = opt['path']
@@ -203,6 +211,20 @@ def _set_independent_train_prob(dataset, prob):
         dataset.independent_train_prob = prob
 
 
+def _set_val_independent_fps(dataset):
+    """Flip independent_fps on a (possibly wrapped) VAL dataset, so mid-training validation
+    samples each shape's FPS points on its own geometry -- the inference regime -- instead of
+    the GT-consistent bijective pairing. Same recursion as _set_independent_train_prob, kept
+    separate so the train path is untouched. Never called on the train set."""
+    if isinstance(dataset, ConcatDataset):
+        for d in dataset.datasets:
+            _set_val_independent_fps(d)
+    elif isinstance(dataset, Subset):
+        _set_val_independent_fps(dataset.dataset)
+    elif hasattr(dataset, 'independent_fps'):
+        dataset.independent_fps = True
+
+
 def _build_phase(spec):
     """Build one dataset, or a ConcatDataset when spec is a list of dataset dicts.
 
@@ -228,7 +250,17 @@ def build_dataloaders(opt, num_workers):
 
     # optional val subset (opt['val']['subset']): validation runs a sampler per pair, so
     # the full val set can be slow; a fixed subset keeps epoch-to-epoch numbers comparable.
-    val_set = _maybe_subset(val_set, (opt.get('val') or {}).get('subset'))
+    val_cfg = opt.get('val') or {}
+    val_set = _maybe_subset(val_set, val_cfg.get('subset'))
+
+    # opt['val']['independent_fps']: validate in the inference regime (each shape FPS'd on its
+    # own geometry, no GT in point selection) and score dense MGE through the densifier, instead
+    # of the bijective sparse dev metric. build_opt has already forced eval to dense-only, since
+    # the sparse diagonal stats are undefined without a bijective sparse GT. Costs a densify per
+    # pair, so pair it with 'subset'. Val set only -- the train set is built above, untouched.
+    if val_cfg.get('independent_fps'):
+        _set_val_independent_fps(val_set)
+        get_root_logger().info('Validation runs under independent FPS (dense MGE via the densifier).')
 
     # overfit knobs (opt['train']): 'subset' picks a few fixed pairs (use a deterministic
     # dataset phase so the sparse FPS points are fixed too), 'repeat' inflates one epoch to

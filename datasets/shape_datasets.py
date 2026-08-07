@@ -5,7 +5,7 @@ from itertools import product
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from utils.data_utils import load_map
+from utils.data_utils import load_map, fps
 from utils.registry import DATASET_REGISTRY
 
 
@@ -163,7 +163,7 @@ class SparsePairFaustDataset(SparsePairShapeDataset):
                  exclude_self=False,
                  fps_metric="geodesic",
                  feats_dir='feats'):
-        dataset = SingleFaustDataset(data_root, phase, ret_faces=True, ret_feats=True,
+        dataset = SingleFaustDataset(data_root, phase, ret_faces=True, ret_feats=False,
                                      ret_corr=True, ret_dist=True, ret_evecs=ret_evecs,
                                      num_evecs=num_evecs, feats_dir=feats_dir)
         super().__init__(dataset, n_sparse=n_sparse, phase=phase, exclude_self=exclude_self,
@@ -200,7 +200,7 @@ class SparsePairSmalDataset(SparsePairShapeDataset):
                  exclude_self=False,
                  fps_metric="geodesic"):
         dataset = SingleSmalDataset(data_root, phase, category, ret_faces=True,
-                                    ret_feats=True, ret_corr=True, ret_dist=True,
+                                    ret_feats=False, ret_corr=True, ret_dist=True,
                                     ret_evecs=ret_evecs, num_evecs=num_evecs)
         super().__init__(dataset, n_sparse=n_sparse, phase=phase, exclude_self=exclude_self,
                          fps_metric=fps_metric)
@@ -273,6 +273,84 @@ class PairShrec19Dataset(Dataset):
         corr = load_map(map_file)                                   # (V_first,) 0-indexed
         item["first"]["corr"] = torch.arange(corr.shape[0]).long()
         item["second"]["corr"] = torch.from_numpy(corr).long()
+        return item
+
+
+@DATASET_REGISTRY.register()
+class SparsePairShrec19Dataset(Dataset):
+    """SHREC19_r evaluation pairs with FPS-sparse tokens (sparse diffusion matcher, test-only).
+
+    The sparse matcher's eval path (evaluate.py) reports dense whole-shape MGE under honest
+    INDEPENDENT FPS -- each shape's sparse points chosen on its own geometry, no GT used to
+    pick them. That is the only regime SHREC19 can support: its GT is a fixed set of per-pair
+    dense maps (corres/{i}_{j}.map), not a shared template, so there is no bijective sparse
+    target and hence no 'sparse_' avg_error/acc pass. Evaluate accordingly with --no_sparse
+    (asserted when independent_fps is left False, i.e. the bijective pass evaluate would run).
+
+    Mirrors PairShrec19Dataset for pair enumeration + per-pair GT (shape 40 dropped -> 407
+    pairs, first['corr']=arange, second['corr'][k]=target of source k), and mirrors
+    SparsePairShapeDataset._independent_item for the sparse tokens. feats are never loaded: a
+    DiffusionNet extractor recomputes descriptors from the cached spectral operators, so only
+    faces/dist/evecs are needed (ret_evecs required by both the extractor and the densifier).
+    """
+    def __init__(self,
+                 data_root,
+                 phase="test",
+                 n_sparse=512,
+                 ret_evecs=True,
+                 num_evecs=200,
+                 fps_metric="geodesic",
+                 exclude_self=False,           # accepted for config-shape parity; no self-pairs exist
+                 ret_faces=True):
+        assert phase == "test", f"SparsePairShrec19Dataset is test-only, got phase={phase!r}"
+        assert fps_metric in ("geodesic", "euclidean"), \
+            f"fps_metric must be 'geodesic' or 'euclidean', got {fps_metric!r}"
+        assert ret_evecs, "SparsePairShrec19Dataset needs ret_evecs (extractor + densifier read the ops)"
+        # dist required for geodesic MGE (and geodesic FPS); no feats (extractor recomputes them).
+        self.dataset = SingleShrec19Dataset(data_root, ret_faces=ret_faces, ret_feats=False,
+                                            ret_corr=False, ret_dist=True,
+                                            ret_evecs=ret_evecs, num_evecs=num_evecs)
+        corr_path = os.path.join(data_root, "corres")
+        assert os.path.isdir(corr_path), f"Invalid path {corr_path} not containing .map files"
+        # Shape 40 has holes; drop it as source and target (ULRSSM), so 430 -> 407 pairs.
+        self.map_files = [f for f in sort_list(glob(f"{corr_path}/*.map"))
+                          if "40" not in os.path.basename(f)]
+        assert self.map_files, f"No .map files under {corr_path}"
+        self.n_sparse = n_sparse
+        self.fps_metric = fps_metric
+        self.train = False
+        # eval-only honest sampling; evaluate.py flips this on for the dense-MGE pass. There is
+        # no bijective sparse GT here, so the bijective (independent_fps=False) pass is unsupported.
+        self.independent_fps = True
+        self.flip_up = self.dataset.flip_up
+
+    def __len__(self):
+        return len(self.map_files)
+
+    def __getitem__(self, index):
+        assert self.independent_fps, \
+            "SparsePairShrec19Dataset only supports the independent-FPS dense-MGE pass; " \
+            "run evaluate.py with --no_sparse (SHREC19 has no bijective sparse GT)."
+        map_file = self.map_files[index]
+        i, j = os.path.splitext(os.path.basename(map_file))[0].split("_")
+        item = {"first": self.dataset[int(i) - 1], "second": self.dataset[int(j) - 1]}
+
+        # Per-pair dense GT (as PairShrec19Dataset): source k <-> target corr[k] on the second.
+        corr = load_map(map_file)                                   # (V_first,) 0-indexed
+        item["first"]["corr"] = torch.arange(corr.shape[0]).long()
+        item["second"]["corr"] = torch.from_numpy(corr).long()
+
+        # Sparse tokens by independent FPS on each shape's own geometry (fixed start,
+        # deterministic). No gt_perm: the two sets do not correspond -- only dense MGE is scored.
+        geo = (self.fps_metric == "geodesic")
+        for shape in (item["first"], item["second"]):
+            idx = torch.from_numpy(fps(shape["verts"].numpy(), self.n_sparse, 0,
+                                       dist=shape["dist"].numpy() if geo else None)).long()
+            shape["sparse"] = {
+                "idx": idx,
+                "verts": shape["verts"][idx],
+                "dist": shape["dist"][idx][:, idx],
+            }
         return item
 
 
@@ -425,7 +503,7 @@ class SparsePairDT4DDataset(SparsePairShapeDataset):
                  num_evecs=200,
                  exclude_self=False,
                  fps_metric="geodesic"):
-        dataset = SingleDT4DDataset(data_root, phase, ret_faces=True, ret_feats=True,
+        dataset = SingleDT4DDataset(data_root, phase, ret_faces=True, ret_feats=False,
                                     ret_corr=True, ret_dist=True, ret_evecs=ret_evecs,
                                     num_evecs=num_evecs)
         super().__init__(dataset, n_sparse=n_sparse, phase=phase, exclude_self=exclude_self,
@@ -470,7 +548,7 @@ class SparsePairScapeDataset(SparsePairShapeDataset):
                  exclude_self=False,
                  fps_metric="geodesic",
                  feats_dir='feats'):
-        dataset = SingleScapeDataset(data_root, phase, ret_faces=True, ret_feats=True,
+        dataset = SingleScapeDataset(data_root, phase, ret_faces=True, ret_feats=False,
                                      ret_corr=True, ret_dist=True, ret_evecs=ret_evecs,
                                      num_evecs=num_evecs, feats_dir=feats_dir)
         super().__init__(dataset, n_sparse=n_sparse, phase=phase, exclude_self=exclude_self,

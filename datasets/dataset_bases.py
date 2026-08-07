@@ -95,7 +95,7 @@ class SingleShapeDataset(Dataset):
     """
     def __init__(self, data_root: str,
                  ret_faces: bool=True,
-                 ret_feats: bool=True,
+                 ret_feats: bool=False,
                  ret_corr: bool=True,
                  ret_dist: bool=True,
                  ret_evecs: bool=False,
@@ -268,7 +268,9 @@ class SparsePairShapeDataset(PairShapeDataset):
     the per-shape/first-second layout mirrors the denoiser's pair-swap symmetry.
 
     Args:
-        dataset: a SingleShapeDataset with ret_corr, ret_dist, ret_feats all True.
+        dataset: a SingleShapeDataset with ret_corr and ret_dist True. ret_feats is optional:
+            a learnable extractor recomputes descriptors from the sparse idx + operators, so
+            the sparse 'feat' block is only attached when the dataset carries frozen features.
         n_sparse: number of sparse points per shape.
         phase: "train" randomises the FPS start each item (sweeps the surface over
             epochs, doubles as augmentation); anything else uses a fixed start
@@ -285,8 +287,8 @@ class SparsePairShapeDataset(PairShapeDataset):
     def __init__(self, dataset, n_sparse: int = 128, phase: str = "train", exclude_self: bool = False,
                  fps_metric: str = "geodesic"):
         super().__init__(dataset, exclude_self=exclude_self)
-        assert dataset.ret_corr and dataset.ret_dist and dataset.ret_feats, \
-            "SparsePairShapeDataset needs corr, dist and feats"
+        assert dataset.ret_corr and dataset.ret_dist, \
+            "SparsePairShapeDataset needs corr and dist"
         assert fps_metric in ("geodesic", "euclidean"), \
             f"fps_metric must be 'geodesic' or 'euclidean', got {fps_metric!r}"
         self.n_sparse = n_sparse
@@ -299,6 +301,20 @@ class SparsePairShapeDataset(PairShapeDataset):
         # config after construction (like independent_fps), so it never touches eval/val.
         self.independent_train_prob = 0.0
         self.fps_metric = fps_metric        # 'geodesic' (intrinsic, pose-robust) or 'euclidean'
+
+    @staticmethod
+    def _sparse_view(shape, idx):
+        """Per-shape sparse token dict for the n picked vertices. 'feat' is attached only when
+        the shape carries frozen features (ret_feats); a learnable extractor recomputes
+        descriptors from idx + the cached operators, so feats are optional (see class doc)."""
+        view = {
+            'idx': idx,
+            'verts': shape['verts'][idx],           # (n, 3), viz/debug (not a denoiser input)
+            'dist': shape['dist'][idx][:, idx],     # (n, n) area-normalised geodesic submatrix
+        }
+        if 'feat' in shape:
+            view['feat'] = shape['feat'][idx]       # (n, d_f) frozen features, when present
+        return view
 
     def _independent_train_item(self, item, x, y, index):
         """(A) Honest independent-FPS training instance on the GT-covered vertices.
@@ -333,12 +349,7 @@ class SparsePairShapeDataset(PairShapeDataset):
         img_x = torch.from_numpy(corr_x[K_y]).long()   # (n,) GT image of each Y query on X
 
         for shape, idx in ((x, idx_x), (y, idx_y)):
-            shape['sparse'] = {
-                'idx': idx,
-                'feat': shape['feat'][idx],
-                'verts': shape['verts'][idx],
-                'dist': shape['dist'][idx][:, idx],
-            }
+            shape['sparse'] = self._sparse_view(shape, idx)
         # (n_y, n_x) geodesic distance from each query's GT image to each source anchor, in X's
         # metric -- the soft-target support. No gt_perm: the sets are non-corresponding.
         item['gt_cross_dist'] = x['dist'][img_x][:, idx_x].float()
@@ -354,12 +365,7 @@ class SparsePairShapeDataset(PairShapeDataset):
         idx_y = torch.from_numpy(fps(y['verts'].numpy(), self.n_sparse, 0,
                                      dist=y['dist'].numpy() if geo else None)).long()
         for shape, idx in ((x, idx_x), (y, idx_y)):
-            shape['sparse'] = {
-                'idx': idx,
-                'feat': shape['feat'][idx],
-                'verts': shape['verts'][idx],
-                'dist': shape['dist'][idx][:, idx],
-            }
+            shape['sparse'] = self._sparse_view(shape, idx)
         return item
 
     def __getitem__(self, index):
@@ -397,19 +403,9 @@ class SparsePairShapeDataset(PairShapeDataset):
         idx_y = torch.from_numpy(corr_y[K]).long()  # (n,) matched vertex indices on Y
 
         # Per-shape sparse views, nested in each shape dict with the full dict's own key
-        # names (feat/dist/verts) plus idx for eval densification.
-        x['sparse'] = {
-            'idx': idx_x,
-            'feat': x['feat'][idx_x],               # (n, d_f)
-            'verts': x['verts'][idx_x],             # (n, 3), viz/debug (not a denoiser input)
-            'dist': x['dist'][idx_x][:, idx_x],     # (n, n) area-normalised geodesic submatrix
-        }
-        y['sparse'] = {
-            'idx': idx_y,
-            'feat': y['feat'][idx_y],
-            'verts': y['verts'][idx_y],
-            'dist': y['dist'][idx_y][:, idx_y],
-        }
+        # names (verts/dist, plus feat when frozen features are loaded) and idx for eval densification.
+        x['sparse'] = self._sparse_view(x, idx_x)
+        y['sparse'] = self._sparse_view(y, idx_y)
 
         # Pair-level fields. Sparse GT is the identity permutation over K: gt_perm[j, i]
         # = 1 means second point j matches first point i. No target shuffle: the denoiser

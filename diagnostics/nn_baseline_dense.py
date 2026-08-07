@@ -58,6 +58,7 @@ from datasets import build_dataset
 from metrics import build_metric
 from models import build_model
 from models.base_model import to_numpy
+from evaluate import apply_override
 from train import autofill_feat_dim
 from utils.options import load_yaml, resolve_experiment_paths
 
@@ -136,12 +137,19 @@ def _install_feature_degradation(model, mode, strength):
     return f'{mode}{strength:g}'
 
 
-def _build(config_path, checkpoint, device, fps_metric, split='test', exclude_self=False):
+def _build(config_path, checkpoint, device, fps_metric, split='test', exclude_self=False,
+           overrides=None):
     """Load a trained checkpoint + a dataset split like evaluate.py, forced into the honest
     independent-FPS regime with dense reporting on (the densifier is required). `split` selects
     datasets.<split> -- use 'train' as a held-out set for tuning selector hyperparameters, so the
-    reported 'test' numbers stay uncontaminated (ret_evecs is forced on so the densifier works)."""
+    reported 'test' numbers stay uncontaminated (ret_evecs is forced on so the densifier works).
+
+    overrides: optional list of evaluate.py-style 'dotted.key=value' strings, applied to the
+    config before anything is built, so eval-time knobs (densifier.k_fm, ...) can be swept from a
+    caller's CLI without copying YAML. Defaulted, so existing callers are unaffected."""
     opt = load_yaml(config_path)
+    for spec in (overrides or []):
+        apply_override(opt, spec)
     if device is not None:
         opt['device'] = device
     opt['is_train'] = False
@@ -162,7 +170,8 @@ def _build(config_path, checkpoint, device, fps_metric, split='test', exclude_se
     dataset.independent_fps = True                                   # honest sampling (dense MGE regime)
     if fps_metric != 'config':
         dataset.fps_metric = fps_metric
-    autofill_feat_dim(opt, int(dataset[0]['first']['feat'].shape[-1]))
+    probe = dataset[0]['first']  # extractor configs ship no frozen 'feat'; autofill is then a no-op
+    autofill_feat_dim(opt, int(probe['feat'].shape[-1]) if 'feat' in probe else 0)
     model = build_model(opt)
     model.eval()
     if getattr(model, 'densifier', None) is None:

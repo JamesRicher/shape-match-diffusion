@@ -1,0 +1,35 @@
+{
+  "name": "smal_diffusionnet_512_FMD_xyz_snrfd_tw_gt",
+  "checkpoint": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/diffusionnet/smal_diffusionnet_512_FMD_xyz_snrfd_tw_gt/models/final.pth",
+  "n_pairs": 380,
+  "n_sparse": 512,
+  "fps_metric": "geodesic",
+  "feat_source": "diffnet",
+  "gt_fm": {
+    "dense_MGE": 0.03550783917307854,
+    "median": 0.02106655389070511,
+    "p90": 0.06572992354631424,
+    "gross_gt_0.1": 0.04148340122613038
+  },
+  "gt_voronoi": {
+    "dense_MGE": 0.019405484199523926,
+    "median": 0.017517728731036186,
+    "p90": 0.03494218364357948,
+    "gross_gt_0.1": 0.005263834567132668
+  },
+  "anchor_drift": {
+    "dense_MGE": 0.028528276830911636,
+    "median": 0.019747434183955193,
+    "p90": 0.056050024926662445,
+    "gross_gt_0.1": 0.032915296052631576
+  },
+  "patch_radius": {
+    "dense_MGE": 0.018899304792284966,
+    "median": 0.017749886959791183,
+    "p90": 0.032993171364068985,
+    "gross_gt_0.1": 0.0007966220800620336
+  },
+  "densifier_floor_MGE": 0.03550783917307854,
+  "fm_minus_voronoi": 0.01610235497355461,
+  "out_dir": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/diffusionnet/smal_diffusionnet_512_FMD_xyz_snrfd_tw_gt/results/benchmarks/smal_diffusionnet_512_FMD_xyz_snrfd_tw_gt"
+}

@@ -212,8 +212,11 @@ def evaluate(opt, ckpt, args):
     test_loader = _RestoringLoader(DataLoader(test_set, batch_size=1, shuffle=False,
                              collate_fn=_single_collate, num_workers=args.num_workers))
 
-    # match each network's input dim to the actual per-vertex feature dim (as in train.py)
-    autofill_feat_dim(opt, int(test_set[0]['first']['feat'].shape[-1]))
+    # match each network's input dim to the actual per-vertex feature dim (as in train.py).
+    # Datasets that rely on a learnable extractor ship no frozen 'feat' (e.g. SHREC19); their
+    # net dims are hardcoded, so autofill is a no-op and 0 is a harmless placeholder.
+    probe = test_set[0]['first']
+    autofill_feat_dim(opt, int(probe['feat'].shape[-1]) if 'feat' in probe else 0)
 
     # the constructor loads `ckpt` (net-only, since is_train is False)
     model = build_model(opt)

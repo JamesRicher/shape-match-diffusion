@@ -83,7 +83,8 @@ def _build(config_path, checkpoint, device):
 
     dataset = build_dataset(opt['datasets']['test'])
     dataset.independent_fps = True                       # honest sampling (matches dense MGE)
-    autofill_feat_dim(opt, int(dataset[0]['first']['feat'].shape[-1]))
+    probe = dataset[0]['first']  # extractor configs ship no frozen 'feat'; autofill is then a no-op
+    autofill_feat_dim(opt, int(probe['feat'].shape[-1]) if 'feat' in probe else 0)
     model = build_model(opt)
     model.eval()
     return model, dataset, opt, ckpt
