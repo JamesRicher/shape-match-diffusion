@@ -4,6 +4,7 @@ import os
 import re
 
 import numpy as np
+import torch
 import yaml
 from torch.utils.data import DataLoader
 
@@ -288,6 +289,7 @@ def evaluate(opt, ckpt, args):
 
 def main():
     args = parse_args()
+    torch.set_float32_matmul_precision('high')   # TF32 matmuls (see train.py note); no-op pre-Ampere
     opt, ckpt = build_opt(args)
     evaluate(opt, ckpt, args)
 
