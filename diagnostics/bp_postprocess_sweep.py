@@ -61,18 +61,43 @@ def _pair_error(p2p, D_x_sparse):
     return D_x_sparse[rows, p2p].cpu().numpy()
 
 
+AXES = ("beta", "sigma", "g", "tau", "delta", "s", "sweeps", "k_cand", "k_graph")
+
+
+def _cached_sample(model, data, idx, cache_dir, tag):
+    """model.sample() memoised to disk as float16. Sampling is the expensive, STOCHASTIC
+    part; caching it makes repeat sweeps cheap and — more importantly — scores every
+    sweep against a byte-identical baseline, so runs are comparable at the 3rd decimal."""
+    path = None if cache_dir is None else os.path.join(cache_dir, f"{tag}_{idx:05d}.npy")
+    if path is not None and os.path.exists(path):
+        P0 = torch.from_numpy(np.load(path)).float().to(model.device)
+        return P0.unsqueeze(0) if P0.dim() == 2 else P0
+    F_x, F_y, D_x, D_y, _ = model._sparse_inputs(data)         # (1,n,d),(1,n,n)
+    P0 = model.sample(F_x, F_y, D_x, D_y)                       # (1,n_y,n_x) DS
+    if isinstance(P0, tuple):
+        P0 = P0[0]
+    if path is not None:
+        os.makedirs(cache_dir, exist_ok=True)
+        np.save(path, P0[0].detach().cpu().numpy().astype(np.float16))
+    return P0
+
+
 @torch.no_grad()
-def run(model, test_set, num_pairs, betas, sigmas, gs, k_cand, k_graph, sweeps,
-        pair_seed=None):
-    """Sweep (beta, sigma, g) on num_pairs test pairs. pair_seed samples the pairs at
-    random instead of taking 0..N-1 -- those are NOT representative, since the pair list
-    is product(range(n), repeat=2) and the first n-1 entries all share one source shape."""
+def run(model, test_set, num_pairs, axes, pair_seed=None, cache_dir=None, tag="bp"):
+    """Sweep the BP scalars over num_pairs test pairs.
+
+    axes: dict of lists keyed by AXES; the grid is their product, so any subset can be
+    swept and the rest held at a single value. pair_seed samples the pairs at random
+    instead of taking 0..N-1 -- those are NOT representative, since the pair list is
+    product(range(n), repeat=2) and the first n-1 entries all share one source shape."""
     logger = get_root_logger()
-    grid = list(itertools.product(betas, sigmas, gs))
+    grid = [dict(zip(AXES, v)) for v in itertools.product(*(axes[a] for a in AXES))]
+    keys = [tuple(cfg[a] for a in AXES) for cfg in grid]
+    varying = [a for a in AXES if len(axes[a]) > 1] or ["beta"]
     base_errs, base_accs, base_argmax = [], [], []
-    grid_errs = {key: [] for key in grid}
-    grid_accs = {key: [] for key in grid}
-    grid_argmax = {key: [] for key in grid}
+    grid_errs = {k: [] for k in keys}
+    grid_accs = {k: [] for k in keys}
+    grid_argmax = {k: [] for k in keys}
 
     N = min(num_pairs, len(test_set))
     if pair_seed is None:
@@ -82,10 +107,8 @@ def run(model, test_set, num_pairs, betas, sigmas, gs, k_cand, k_graph, sweeps,
         pairs = sorted(rng.choice(len(test_set), N, replace=False).tolist())
     for idx in tqdm(pairs, desc=f"BP sweep ({len(grid)} grid points)"):
         data = test_set[idx]
-        F_x, F_y, D_x, D_y, _ = model._sparse_inputs(data)     # (1,n,d),(1,n,n)
-        P0 = model.sample(F_x, F_y, D_x, D_y)                   # (1,n_y,n_x) DS
-        if isinstance(P0, tuple):
-            P0 = P0[0]
+        P0 = _cached_sample(model, data, idx, cache_dir, tag)
+        F_x, F_y, D_x, D_y, _ = model._sparse_inputs(data)
         logits = safe_log(P0)                                  # source=Y rows
 
         D_x_sparse = data["first"]["sparse"]["dist"]           # (n_x,n_x) for error lookup
@@ -107,43 +130,47 @@ def run(model, test_set, num_pairs, betas, sigmas, gs, k_cand, k_graph, sweeps,
         # column means "BP works but is redundant with Hungarian", NOT "BP does nothing".
         base_argmax.append(acc(P0[0].argmax(-1)))
 
-        for (beta, sigma, g) in grid:
+        for cfg, key in zip(grid, keys):
             ref = bp_refine(logits, F_y, F_x, D_y, D_x,        # variables on Y: src feats/metric = Y
-                            k_logit=k_cand, k_feat=k_cand, k_graph=k_graph,
-                            beta=beta, sigma=sigma, g=g, n_sweeps=sweeps)
+                            k_logit=cfg["k_cand"], k_feat=cfg["k_cand"],
+                            k_graph=cfg["k_graph"], n_sweeps=cfg["sweeps"],
+                            beta=cfg["beta"], sigma=cfg["sigma"], g=cfg["g"],
+                            tau=cfg["tau"], delta=cfg["delta"], s=cfg["s"])
             p2p = hungarian(ref)
-            grid_errs[(beta, sigma, g)].append(_pair_error(p2p, D_x_sparse))
-            grid_accs[(beta, sigma, g)].append(acc(p2p))
-            grid_argmax[(beta, sigma, g)].append(acc(ref[0].argmax(-1)))
+            grid_errs[key].append(_pair_error(p2p, D_x_sparse))
+            grid_accs[key].append(acc(p2p))
+            grid_argmax[key].append(acc(ref[0].argmax(-1)))
 
     base_per_pair = np.array([e.mean() for e in base_errs])
     base_err = float(np.concatenate(base_errs).mean())
     base_acc = float(np.mean(base_accs))
     base_am = float(np.mean(base_argmax))
     rows = {}
-    logger.info(f"\n{'beta':>6} {'sigma':>7} {'g':>6} {'err':>9} {'d_err':>9} {'acc':>7} "
-                f"{'d_acc':>7} {'win':>6} {'argmax':>7}")
-    logger.info(f"{'BASE':>6} {'':>7} {'':>6} {base_err:>9.4f} {'':>9} {base_acc:>7.3f} "
+    # only the axes actually swept get a column, so a 6-axis sweep stays readable
+    head = " ".join(f"{a:>8}" for a in varying)
+    logger.info(f"\n{head} {'err':>9} {'d_err':>9} {'acc':>7} {'d_acc':>7} {'win':>6} "
+                f"{'argmax':>7}")
+    logger.info(f"{'BASE':>{len(head)}} {base_err:>9.4f} {'':>9} {base_acc:>7.3f} "
                 f"{'':>7} {'':>6} {base_am:>7.3f}")
     best = (base_err, None)
-    for key in grid:
+    for cfg, key in zip(grid, keys):
         e = float(np.concatenate(grid_errs[key]).mean())
         a = float(np.mean(grid_accs[key]))
         am = float(np.mean(grid_argmax[key]))
         # paired per-pair win rate: guards against a mean driven by a few rescued disasters
         per_pair = np.array([x.mean() for x in grid_errs[key]])
         win = float((per_pair < base_per_pair).mean())
-        beta, sigma, g = key
         flag = "  <-- best" if e < best[0] else ""
         if e < best[0]:
             best = (e, key)
-        rows[str(key)] = {"err": e, "d_err": e - base_err, "acc": a, "d_acc": a - base_acc,
-                          "win_rate": win, "argmax_acc": am,
+        rows[str(key)] = {**cfg, "err": e, "d_err": e - base_err, "acc": a,
+                          "d_acc": a - base_acc, "win_rate": win, "argmax_acc": am,
                           # per-pair, so CIs / plots / win rates can be recomputed without
                           # re-running the sweep
                           "per_pair_err": per_pair.tolist(),
                           "per_pair_acc": grid_accs[key]}
-        logger.info(f"{beta:>6.2f} {sigma:>7.4f} {g:>6.2f} {e:>9.4f} {e - base_err:>+9.4f} "
+        vals = " ".join(f"{cfg[a]:>8g}" for a in varying)
+        logger.info(f"{vals} {e:>9.4f} {e - base_err:>+9.4f} "
                     f"{a:>7.3f} {a - base_acc:>+7.3f} {win:>6.2f} {am:>7.3f}{flag}")
 
     if best[1] is None:
@@ -154,8 +181,8 @@ def run(model, test_set, num_pairs, betas, sigmas, gs, k_cand, k_graph, sweeps,
                     f"(baseline {base_err:.4f}, improvement {base_err - best[0]:+.4f}); "
                     f"improves {b['win_rate']:.2f} of pairs; argmax acc {base_am:.3f} -> "
                     f"{b['argmax_acc']:.3f}")
-    summary = {"num_pairs": len(pairs), "pair_seed": pair_seed, "sweeps": sweeps,
-               "k_cand": k_cand, "k_graph": k_graph, "pairs": list(pairs),
+    summary = {"num_pairs": len(pairs), "pair_seed": pair_seed, "axes": axes,
+               "pairs": list(pairs),
                "base": {"err": base_err, "acc": base_acc, "argmax_acc": base_am,
                         "per_pair_err": base_per_pair.tolist(),
                         "per_pair_acc": base_accs},
@@ -172,14 +199,28 @@ def parse_args():
     p.add_argument("--betas", type=float, nargs="+", default=[0.5, 1.0, 2.0])
     p.add_argument("--sigmas", type=float, nargs="+", default=[0.02, 0.05, 0.1])
     p.add_argument("--gs", type=float, nargs="+", default=[1.0, 2.0, 4.0])
-    p.add_argument("--k_cand", type=int, default=8)
-    p.add_argument("--k_graph", type=int, default=8)
-    p.add_argument("--sweeps", type=int, default=3)
+    p.add_argument("--k_cand", type=int, nargs="+", default=[8])
+    p.add_argument("--k_graph", type=int, nargs="+", default=[8])
+    p.add_argument("--sweeps", type=int, nargs="+", default=[3],
+                   help="BP sweeps; pass several (e.g. 1 2 4 8 16) for the test-time "
+                        "inference-scaling curve, the figure that separates BP from an MPNN")
+    p.add_argument("--taus", type=float, nargs="+", default=[1.0],
+                   help="semiring temperature: 1 = sum-product, ->0 approaches max-product")
+    p.add_argument("--deltas", type=float, nargs="+", default=[4.0],
+                   help="truncation in nats; with sigma sets the capture radius sqrt(2*delta)*sigma")
+    p.add_argument("--slacks", type=float, nargs="+", default=[-4.0],
+                   help="slack (abstention) score, on the raw logit scale -- couples to beta")
     p.add_argument("--pair_seed", type=int, default=None,
                    help="sample --num_pairs test pairs at random with this seed; without "
                         "it the first N pairs are used, and those all share one source "
                         "shape (product(range(n), repeat=2)) -- not representative")
     p.add_argument("--json", default=None, help="write the summary dict here")
+    p.add_argument("--cache_dir", default=None,
+                   help="memoise model.sample() here (float16, ~0.5MB/pair); makes repeat "
+                        "sweeps cheap and pins the baseline so runs are comparable")
+    p.add_argument("--cache_tag", default="bp",
+                   help="prefix for cache files; CHANGE IT when the checkpoint or config "
+                        "changes, or stale samples will be reused silently")
     return p.parse_args()
 
 
@@ -187,15 +228,18 @@ if __name__ == "__main__":
     args = parse_args()
     model, test_set, ckpt = _load(args.config, args.checkpoint, args.device)
     N = min(args.num_pairs, len(test_set))
+    axes = {"beta": args.betas, "sigma": args.sigmas, "g": args.gs, "tau": args.taus,
+            "delta": args.deltas, "s": args.slacks, "sweeps": args.sweeps,
+            "k_cand": args.k_cand, "k_graph": args.k_graph}
+    n_grid = int(np.prod([len(v) for v in axes.values()]))
     get_root_logger().info(f"loaded {ckpt}; {len(test_set)} test pairs, sweeping "
-                           f"{len(args.betas)}x{len(args.sigmas)}x{len(args.gs)} grid "
-                           f"on {N} pairs "
+                           f"{n_grid} grid points on {N} pairs "
                            f"({'random, seed ' + str(args.pair_seed) if args.pair_seed is not None else 'sequential'})")
     if args.pair_seed is None and N < len(test_set):
         get_root_logger().info("WARNING: sequential pairs are one source shape vs the rest; "
                                "pass --pair_seed or run all pairs for a representative number")
-    _, summary = run(model, test_set, args.num_pairs, args.betas, args.sigmas, args.gs,
-                     args.k_cand, args.k_graph, args.sweeps, args.pair_seed)
+    _, summary = run(model, test_set, args.num_pairs, axes, args.pair_seed,
+                     args.cache_dir, args.cache_tag)
     if args.json:
         with open(args.json, "w") as f:
             json.dump(summary, f, indent=2)
