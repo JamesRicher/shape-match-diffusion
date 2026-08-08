@@ -1,0 +1,164 @@
+{
+  "name": "smal_mpnn_512_FMD_xyz_snrfd_tw_gt_indep_light",
+  "model_type": null,
+  "timestamp": "2026-08-08T04:28:58+00:00",
+  "git_commit": "a9c38b2",
+  "device": "cuda",
+  "networks": {
+    "extractor": {
+      "class": "DiffusionNetExtractor",
+      "num_params": 477824,
+      "num_trainable": 477824
+    },
+    "denoiser": {
+      "class": "MPNNMatrixDenoiser",
+      "num_params": 2566920,
+      "num_trainable": 2566920
+    }
+  },
+  "config": {
+    "name": "smal_mpnn_512_FMD_xyz_snrfd_tw_gt_indep_light",
+    "group": "mpnn_diffusion",
+    "is_train": true,
+    "path": {
+      "resume_state": "extractor_experiments/diffusion_net/smal_diffusionnet_xyz/models/best.pth",
+      "resume": false,
+      "experiment_root": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/mpnn_diffusion/smal_mpnn_512_FMD_xyz_snrfd_tw_gt_indep_light",
+      "models": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/mpnn_diffusion/smal_mpnn_512_FMD_xyz_snrfd_tw_gt_indep_light/models",
+      "results": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/mpnn_diffusion/smal_mpnn_512_FMD_xyz_snrfd_tw_gt_indep_light/results"
+    },
+    "datasets": {
+      "train": {
+        "name": "Smal_r",
+        "type": "SparsePairSmalDataset",
+        "phase": "train",
+        "n_sparse": 512,
+        "exclude_self": true,
+        "category": true,
+        "fps_metric": "euclidean",
+        "ret_evecs": true,
+        "num_evecs": 128
+      },
+      "val": {
+        "name": "Smal_r",
+        "type": "SparsePairSmalDataset",
+        "phase": "test",
+        "n_sparse": 512,
+        "exclude_self": true,
+        "category": true,
+        "fps_metric": "euclidean",
+        "ret_evecs": true,
+        "num_evecs": 128
+      },
+      "test": {
+        "name": "Smal_r",
+        "type": "SparsePairSmalDataset",
+        "phase": "test",
+        "n_sparse": 512,
+        "exclude_self": true,
+        "category": true,
+        "ret_evecs": true,
+        "num_evecs": 200,
+        "fps_metric": "euclidean"
+      }
+    },
+    "networks": {
+      "extractor": {
+        "type": "DiffusionNetExtractor",
+        "out_dim": 128,
+        "input_type": "xyz",
+        "rot_aug": [
+          0,
+          180,
+          0
+        ],
+        "hidden": 128,
+        "n_block": 4,
+        "k_eig": 128
+      },
+      "denoiser": {
+        "type": "MPNNMatrixDenoiser",
+        "feat_dim": 128,
+        "dim": 128,
+        "depth": 4,
+        "heads": 4,
+        "cross_type": "mpnn",
+        "mlp_ratio": 2.0,
+        "k_intra": 8,
+        "k_feat": 8,
+        "k_state": 8,
+        "n_rbf": 8,
+        "rbf_max": 3.0,
+        "inner_iters": 2,
+        "dropout": 0.0
+      }
+    },
+    "diffusion": {
+      "eta": 0.1,
+      "proj_iters": 6,
+      "schedule_s": 0.008,
+      "logsnr_shift": 0.0,
+      "feature_dropout": 0.3,
+      "t_sampler": {
+        "t_min_drop": 0.35,
+        "t_min_feat": 0.6,
+        "uniform_frac": 0.1
+      },
+      "target": {
+        "type": "gaussian",
+        "sigma": 0.03,
+        "cutoff": 0.09,
+        "floor": 0.0002
+      },
+      "sample_steps": 50,
+      "final_iters": 20
+    },
+    "densifier": {
+      "type": "FunctionalMapDensifier",
+      "feat_source": "diffnet",
+      "k_fm": 120,
+      "n_e": 100,
+      "lm_bands": 20,
+      "lm_weight": 5.0,
+      "mu": 0.1,
+      "variance": 7.0
+    },
+    "eval": {
+      "sparse": false,
+      "dense": true
+    },
+    "train": {
+      "total_epochs": 180,
+      "log_freq": 20,
+      "independent_train_prob": 1.0,
+      "optims": {
+        "extractor": {
+          "type": "AdamW",
+          "lr": 0.0001,
+          "weight_decay": 0.0001
+        },
+        "denoiser": {
+          "type": "AdamW",
+          "lr": 0.001,
+          "weight_decay": 0.0001
+        }
+      },
+      "schedulers": {
+        "extractor": {
+          "type": "CosineAnnealingLR",
+          "eta_min": 1e-05,
+          "T_max": 180
+        },
+        "denoiser": {
+          "type": "CosineAnnealingLR",
+          "eta_min": 0.0001,
+          "T_max": 180
+        }
+      }
+    },
+    "val": {
+      "subset": 20,
+      "independent_fps": true
+    }
+  }
+}
