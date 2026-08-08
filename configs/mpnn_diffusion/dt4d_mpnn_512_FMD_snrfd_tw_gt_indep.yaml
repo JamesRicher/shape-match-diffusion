@@ -92,4 +92,8 @@ train:
     denoiser:  {type: CosineAnnealingLR, eta_min: 1e-4}
 
 val:
-  subset: 40
+  subset: 20                # halved: independent-FPS val densifies every pair (see below)
+  independent_fps: true     # validate in the inference regime (no GT in FPS selection).
+                            # Forces eval.sparse=false / eval.dense=true in train.py: the
+                            # sparse diagonal error/acc are undefined without gt_perm, so the
+                            # reported dev number becomes dense MGE through the densifier.
