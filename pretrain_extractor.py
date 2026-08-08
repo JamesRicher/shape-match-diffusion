@@ -118,6 +118,7 @@ def evaluate(ext, dataset, loss_fn, limit=None):
 
 
 def main():
+    torch.set_float32_matmul_precision('high')   # TF32 matmuls (see train.py note)
     p = argparse.ArgumentParser()
     p.add_argument('-c', '--config', default=DEFAULT_CONFIG, help='debug FE config (yaml)')
     p.add_argument('--name', default=None, help='override run name (run dir under runs/)')

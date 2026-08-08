@@ -77,16 +77,16 @@ def _gather_rows(cand_idx, nbr):
     return torch.gather(cand_idx, 1, flat).reshape(B, n, k, Kc)
 
 
-def _pairwise(cand_idx, cand_mask, nbr, D_x, D_y, sigma, delta):
-    """Stage 2: log ψ (B, n, k, Kc+1, Kc+1) per directed edge (source a-axis, dest c-axis).
+def edge_distortion(cand_idx, nbr, D_x, D_y):
+    """Isometric distortion of every candidate pair on every message edge.
 
-    log ψ = -min((d_Y(a,c) - d_X_edge)^2 / 2σ^2, δ); slack row/col = 0 (compatible with
-    everything); rows of invalid source cands and cols of invalid dest cands = -inf.
+    For directed edge (i, slot) with source neighbour s = nbr[i,slot], returns
+    d_Y(cand(s)_a, cand(i)_c) - d_X(i, s) as (B, n, k, Kc_a, Kc_c) — the signed quantity
+    the pairwise potential squares. Exposed so diagnostics can calibrate sigma against
+    the exact distortion log ψ sees.
     """
     B, n, Kc = cand_idx.shape
     k = nbr.shape[-1]
-    Kp1 = Kc + 1
-
     d_x_edge = torch.gather(D_x, -1, nbr)                        # (B, n, k)
     cand_s = _gather_rows(cand_idx, nbr)                        # (B, n, k, Kc) source cands
     cand_d = cand_idx.unsqueeze(2).expand(-1, -1, k, -1)        # (B, n, k, Kc) dest cands
@@ -97,8 +97,20 @@ def _pairwise(cand_idx, cand_mask, nbr, D_x, D_y, sigma, delta):
     Dr = Dr.reshape(B, n, k, Kc, D_y.shape[-1])                 # (B,n,k,Kc_a, m)
     c_exp = cand_d.unsqueeze(3).expand(-1, -1, -1, Kc, -1)      # (B,n,k,Kc_a,Kc_c)
     d_y = torch.gather(Dr, -1, c_exp)                          # (B,n,k,Kc_a,Kc_c)
+    return d_y - d_x_edge[..., None, None]
 
-    diff = d_y - d_x_edge[..., None, None]
+
+def _pairwise(cand_idx, cand_mask, nbr, D_x, D_y, sigma, delta):
+    """Stage 2: log ψ (B, n, k, Kc+1, Kc+1) per directed edge (source a-axis, dest c-axis).
+
+    log ψ = -min((d_Y(a,c) - d_X_edge)^2 / 2σ^2, δ); slack row/col = 0 (compatible with
+    everything); rows of invalid source cands and cols of invalid dest cands = -inf.
+    """
+    B, n, Kc = cand_idx.shape
+    k = nbr.shape[-1]
+    Kp1 = Kc + 1
+
+    diff = edge_distortion(cand_idx, nbr, D_x, D_y)
     log_psi_real = -torch.clamp(diff.pow(2) / (2.0 * sigma ** 2), max=float(delta))
 
     log_psi = torch.zeros(B, n, k, Kp1, Kp1, device=D_x.device)

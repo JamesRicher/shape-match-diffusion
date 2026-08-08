@@ -175,6 +175,7 @@ def visualise(ext, dataset, index, gap=1.2):
 
 
 def main():
+    torch.set_float32_matmul_precision('high')   # TF32 matmuls (see train.py note)
     p = argparse.ArgumentParser()
     p.add_argument('-c', '--config', default=DEFAULT_CONFIG, help='debug FE config (yaml)')
     p.add_argument('--name', default=None, help="run name to locate the checkpoint (default: config name)")
