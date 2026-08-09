@@ -158,6 +158,117 @@ def _q(x, qs=(50, 75, 90, 95, 99)):
     return {f"p{q}": float(np.percentile(x, q)) for q in qs}
 
 
+def _pred_slot(cand_idx, pred):
+    """Slot of the CURRENTLY PREDICTED label in each vertex's candidate set -> (slot, hit).
+
+    hit is False where the argmax label was not itself proposed as a candidate (possible
+    since candidates are feature-kNN union logit top-k over a subsample); those vertices
+    are excluded, as there is no head-to-head to score.
+    """
+    match = cand_idx == pred.unsqueeze(-1)
+    return match.float().argmax(-1), match.any(-1)
+
+
+def _wrong_vertex_stats(cand, cmask, nbr, D_src, D_tgt, pred, sigmas, delta):
+    """THE GO/NO-GO GATE: can the pairwise potential reverse the model's ACTUAL mistakes?
+
+    The near-miss / random tables score the truth against SYNTHETIC distractors. Neither is
+    the decision BP has to make, which is: at a vertex the argmax got wrong, does the
+    geometry prefer the true label over the one the model actually chose? Restricted to
+    wrong vertices whose truth AND prediction are both in the candidate set.
+
+    Two families, per sigma:
+
+    head-to-head  log psi(truth) - log psi(pred) on each incident edge, under two
+                  conditions for the NEIGHBOUR's label -- 'oracle' (neighbour at its true
+                  label: the evidence available once neighbours are already right) and
+                  'self' (neighbour at its own predicted label: what sweep 1 actually sees
+                  from the current map). Reported as edge-level and vertex-level (summed
+                  over the vertex's k edges) win rates -- vertex-level is the decision.
+
+    message       one BP message from uniform priors, m(c) = logsumexp_a log psi(a, c),
+                  summed over the vertex's k incident edges, i.e. the ACCUMULATED geometric
+                  evidence over its candidate set. p_true is the softmax weight of the true
+                  label and rank is the fraction of candidates scoring above it. This is
+                  the one that matters: a single edge only pins a candidate to a geodesic
+                  circle, so weak per-edge evidence can still localise once k edges are
+                  intersected. lift is over 1/Kc (a label choice), NOT the 1/Kc^2 of the
+                  pair tables -- the two are not comparable.
+    """
+    n = cand.shape[1]
+    truth = torch.arange(n, device=cand.device)
+    t_slot, t_hit = _gt_slot(cand)
+    p_slot, p_hit = _pred_slot(cand, pred)
+    wrong = (pred != truth) & t_hit & p_hit                      # (1, n) scorable mistakes
+    diff = edge_distortion(cand, nbr, D_src, D_tgt)
+    valid = _valid_pair_mask(cmask, nbr)
+    # only edges whose neighbour also has both labels available
+    nb_ok = _gather_rows((t_hit & p_hit).long().unsqueeze(-1), nbr).squeeze(-1).bool()
+    edge_ok = wrong.unsqueeze(-1) & nb_ok                        # (1, n, k)
+    out = {"n_wrong": int(wrong.sum().item()), "sigma": {}}
+    if out["n_wrong"] == 0:
+        return out
+
+    for s in sigmas:
+        log_psi = -torch.clamp(diff.pow(2) / (2.0 * s ** 2), max=float(delta))
+        log_psi = log_psi.masked_fill(~valid, NEG_INF)
+        d = {}
+        for name, a_slot in (("oracle", t_slot), ("self", p_slot)):
+            gap = (_pair_index(log_psi, a_slot, t_slot, nbr)
+                   - _pair_index(log_psi, a_slot, p_slot, nbr))  # (1, n, k) >0 favours truth
+            gap = torch.nan_to_num(gap, nan=0.0, posinf=0.0, neginf=0.0)
+            e = gap[edge_ok]
+            v = (gap * edge_ok).sum(-1)[wrong]                   # summed over incident edges
+            d[f"edge_win_{name}"] = float((e > 0).float().mean().item()) if e.numel() else float("nan")
+            d[f"vertex_win_{name}"] = float((v > 0).float().mean().item())
+        # accumulated single-sweep message from uniform priors
+        msg = torch.logsumexp(log_psi, dim=-2)                   # (1, n, k, Kc) over senders
+        msg = msg - torch.logsumexp(msg, dim=-1, keepdim=True)
+        M = (msg * edge_ok.unsqueeze(-1)).sum(2)                 # (1, n, Kc) over edges
+        M = M.masked_fill(~cmask, NEG_INF)
+        logp = M - torch.logsumexp(M, dim=-1, keepdim=True)
+        p_true = logp.gather(-1, t_slot.unsqueeze(-1)).squeeze(-1).exp()[wrong]
+        m_true = M.gather(-1, t_slot.unsqueeze(-1))
+        rank = ((M > m_true) & cmask).sum(-1).float() / cmask.sum(-1).clamp_min(1).float()
+        d["msg_p_true"] = float(p_true.mean().item())
+        d["msg_chance"] = float((1.0 / cmask.sum(-1).clamp_min(1).float())[wrong].mean().item())
+        d["msg_lift"] = d["msg_p_true"] / max(d["msg_chance"], 1e-9)
+        d["msg_rank"] = float(rank[wrong].mean().item())
+        d["msg_top1"] = float((rank[wrong] == 0).float().mean().item())
+        out["sigma"][s] = d
+    return out
+
+
+def _report_gate(out, sigmas, logger):
+    """Print the wrong-argmax go/no-go block (no-op unless model mode produced it)."""
+    if "wrong_argmax" not in out:
+        return
+    w = out["wrong_argmax"]
+    logger.info(f"\n=== GO/NO-GO: the potential vs the model's OWN mistakes "
+                f"({w['n_wrong']} wrong vertices over {w['n_pairs']} pairs) ===")
+    logger.info("truth-vs-predicted head-to-head (win > 0.5 = geometry prefers the truth); "
+                "msg = accumulated 1-sweep evidence over the candidate set")
+    logger.info(f"{'sigma':>8} {'edge_win':>9} {'vtx_win':>8} {'vtx_win_s':>10} "
+                f"{'msg_lift':>9} {'msg_top1':>9} {'msg_rank':>9}")
+    for s in sigmas:
+        r = w["sigma"][f"{s:g}"]
+        logger.info(f"{s:>8.4f} {r['edge_win_oracle']:>9.3f} {r['vertex_win_oracle']:>8.3f} "
+                    f"{r['vertex_win_self']:>10.3f} {r['msg_lift']:>9.2f} "
+                    f"{r['msg_top1']:>9.3f} {r['msg_rank']:>9.3f}")
+    best_s = max(sigmas, key=lambda s: w["sigma"][f"{s:g}"]["vertex_win_oracle"])
+    b = w["sigma"][f"{best_s:g}"]
+    if b["vertex_win_oracle"] < 0.55:
+        logger.info(f"NO-GO: at best (sigma={best_s:g}) geometry prefers the truth over the "
+                    f"model's own choice on only {b['vertex_win_oracle']:.3f} of wrong "
+                    f"vertices -- the potential cannot reverse these mistakes; do not build "
+                    f"the in-loop version on this evidence.")
+    else:
+        logger.info(f"GO: at sigma={best_s:g} geometry prefers the truth on "
+                    f"{b['vertex_win_oracle']:.3f} of wrong vertices (self-consistent "
+                    f"{b['vertex_win_self']:.3f}), msg lift {b['msg_lift']:.2f}x, truth "
+                    f"ranked top on {b['msg_top1']:.3f}")
+
+
 def _candidate_stats(cand, cmask, nbr, D_src, D_tgt, sigmas, delta, keep, pred=None):
     """All per-pair statistics for one candidate set. Returns a dict of arrays/scalars.
 
@@ -194,7 +305,7 @@ def _candidate_stats(cand, cmask, nbr, D_src, D_tgt, sigmas, delta, keep, pred=N
 
 @torch.no_grad()
 def run(test_set, model, num_pairs, k_graph, k_cand, sigmas, delta, max_keep=400_000,
-        pair_seed=None):
+        pair_seed=None, gate_only=False):
     logger = get_root_logger()
     N = min(num_pairs, len(test_set))
     # Sequential pairs are product(range(n), repeat=2), so the first N all share ONE source
@@ -209,9 +320,12 @@ def run(test_set, model, num_pairs, k_graph, k_cand, sigmas, delta, max_keep=400
         pairs = sorted(np.random.default_rng(pair_seed).choice(
             len(test_set), size=N, replace=False).tolist())
     Kc = 2 * k_cand                                              # width of the real sets
-    modes = (["model"] if model is not None else []) + ["nearmiss", "random"]
+    # gate_only: skip the nearmiss/random/model bracket tables entirely and compute just the
+    # wrong-argmax go/no-go, which needs only the model's own candidate sets
+    modes = ["model"] if gate_only else (
+        (["model"] if model is not None else []) + ["nearmiss", "random"])
     acc = {m: [] for m in modes}
-    gt_dist, logit_spread = [], []
+    gt_dist, logit_spread, wrong_acc = [], [], []
     rng = np.random.default_rng(0)
 
     def keep(t):
@@ -241,12 +355,15 @@ def run(test_set, model, num_pairs, k_graph, k_cand, sigmas, delta, max_keep=400
                 cand, cmask = build_candidate_sets(logits, F_y, F_x, k_cand, k_cand)
                 logit_spread.append(keep(_spread(torch.gather(logits, -1, cand), cmask)))
                 pred = logits.argmax(-1)
+                wrong_acc.append(_wrong_vertex_stats(cand, cmask, nbr, D_src, D_tgt,
+                                                     pred, sigmas, delta))
             elif m == "nearmiss":
                 cand, cmask = _nearmiss_candidates(D_tgt, Kc)
             else:
                 cand, cmask = _random_candidates(D_tgt, Kc, seed=idx)
-            acc[m].append(_candidate_stats(cand, cmask, nbr, D_src, D_tgt,
-                                           sigmas, delta, keep, pred))
+            if not gate_only:                                    # the three bracket tables
+                acc[m].append(_candidate_stats(cand, cmask, nbr, D_src, D_tgt,
+                                               sigmas, delta, keep, pred))
 
     cat = lambda vs: np.concatenate(vs)
     out = {"num_pairs": N, "pair_seed": pair_seed, "pairs": pairs,
@@ -254,7 +371,7 @@ def run(test_set, model, num_pairs, k_graph, k_cand, sigmas, delta, max_keep=400
            "mode": "model" if model is not None else "model-free",
            "gt_distortion": _q(cat(gt_dist)), "candidates": {}}
     raw = {"gt_dist": cat(gt_dist), "modes": {}}
-    for m in modes:
+    for m in (() if gate_only else modes):
         st = acc[m]
         ranks = cat([p["ranks"] for p in st])
         d = {"coverage": float(np.mean([p["coverage"] for p in st])),
@@ -275,6 +392,23 @@ def run(test_set, model, num_pairs, k_graph, k_cand, sigmas, delta, max_keep=400
         out["candidates"][m] = d
         raw["modes"][m] = {"ranks": ranks,
                            "p_gt": [d["sigma"][f"{s:g}"]["p_gt"] for s in sigmas]}
+
+    # ---- the go/no-go gate: BP vs the model's ACTUAL mistakes (model mode only) ----
+    scored = [w for w in wrong_acc if w["n_wrong"] > 0]
+    if scored:
+        n_wrong = int(np.sum([w["n_wrong"] for w in scored]))
+        keys = list(scored[0]["sigma"][sigmas[0]].keys())
+        # weight each pair by its wrong-vertex count, so pairs with few mistakes don't
+        # dominate the mean
+        wts = np.array([w["n_wrong"] for w in scored], dtype=float)
+        out["wrong_argmax"] = {"n_wrong": n_wrong, "n_pairs": len(scored), "sigma": {
+            f"{s:g}": {k: float(np.average([w["sigma"][s][k] for w in scored], weights=wts))
+                       for k in keys} for s in sigmas}}
+
+    if gate_only:                                                # nothing below applies
+        out["sigma_from_gt_distortion"] = out["gt_distortion"]["p90"]
+        _report_gate(out, sigmas, logger)
+        return out, raw
 
     # the primary mode decides sigma: the real candidate sets if we have them
     primary = "model" if model is not None else "nearmiss"
@@ -306,6 +440,8 @@ def run(test_set, model, num_pairs, k_graph, k_cand, sigmas, delta, max_keep=400
             flag = "  <--" if s == d["sigma_argmax"] else ""
             logger.info(f"{s:>8.4f} {r['p_gt']:>8.4f} {r['p_gt'] / max(d['chance'], 1e-9):>7.2f} "
                         f"{r['trunc_frac']:>7.3f} {r['geo_spread']:>11.3f}{flag}")
+
+    _report_gate(out, sigmas, logger)
 
     logger.info(f"\nprimary candidate set: {primary}")
     if "beta_recommended" in out:
@@ -369,6 +505,9 @@ def _figure(out, raw, sigmas, path):
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("-c", "--config", required=True)
+    p.add_argument("--gate_only", action="store_true",
+                   help="run ONLY the wrong-argmax go/no-go gate, skipping the nearmiss / "
+                        "random / model bracket tables (implies --with_model)")
     p.add_argument("--with_model", action="store_true",
                    help="use a trained checkpoint's real candidate sets and logit scale")
     p.add_argument("--checkpoint", default=None)
@@ -392,7 +531,7 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    if args.with_model:
+    if args.with_model or args.gate_only:
         model, test_set, ckpt = _load(args.config, args.checkpoint, args.device, args.overrides)
         get_root_logger().info(f"loaded {ckpt}")
     else:
@@ -402,12 +541,13 @@ if __name__ == "__main__":
             apply_override(opt, spec)
         test_set = build_dataset(opt["datasets"]["test"])
     summary, raw = run(test_set, model, args.num_pairs, args.k_graph, args.k_cand,
-                       sorted(args.sigmas), args.delta, pair_seed=args.pair_seed)
+                       sorted(args.sigmas), args.delta, pair_seed=args.pair_seed,
+                       gate_only=args.gate_only)
     # after run(), so a missing output dir can't throw away a completed calibration
     for path in (args.out, args.json):
         if path and os.path.dirname(path):
             os.makedirs(os.path.dirname(path), exist_ok=True)
-    if args.out:
+    if args.out and not args.gate_only:                          # figure needs the bracket tables
         _figure(summary, raw, sorted(args.sigmas), args.out)
     if args.json:
         with open(args.json, "w") as f:
