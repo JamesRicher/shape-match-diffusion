@@ -1,0 +1,25 @@
+{
+  "name": "dt4d_mpnn_512_FMD_snrfd_tw_gt_indep",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/mpnn_diffusion/dt4d_mpnn_512_FMD_snrfd_tw_gt_indep/models/final.pth",
+  "n_pairs": 740,
+  "fps_metric": "euclidean",
+  "feat_source": "diffnet",
+  "overrides": [
+    "datasets.test.inter_class=false",
+    "datasets.test.exclude_self=true"
+  ],
+  "degradation": null,
+  "nn_baseline": {
+    "dense_MGE": 0.012619441375136375,
+    "median": 0.010664611123502254,
+    "p90": 0.02536546066403389,
+    "gross_gt_0.1": 0.0033553632399175148
+  },
+  "hungarian": {
+    "dense_MGE": 0.014284678734838963,
+    "median": 0.01180658582597971,
+    "p90": 0.027120620012283325,
+    "gross_gt_0.1": 0.0042512085460261655
+  },
+  "out_dir": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/mpnn_diffusion/dt4d_mpnn_512_FMD_snrfd_tw_gt_indep/results/benchmarks/dt4d_mpnn_512_FMD_snrfd_tw_gt_indep"
+}
