@@ -180,7 +180,11 @@ def run(model, test_set, num_pairs, axes, pair_seed=None, cache_dir=None, tag="b
     rows = {}
     # only the axes actually swept get a column, so a 6-axis sweep stays readable
     head = " ".join(f"{a:>8}" for a in varying)
-    logger.info(f"\n{head} {'err':>9} {'d_err':>9} {'acc':>7} {'d_acc':>7} {'win':>6} "
+    # blank line as its OWN record: a leading \n inside the message would put the logger's
+    # timestamp prefix before the newline, so the header would start at column 0 while every
+    # data row below it is indented by the prefix -- i.e. a misaligned table
+    logger.info("")
+    logger.info(f"{head} {'err':>9} {'d_err':>9} {'acc':>7} {'d_acc':>7} {'win':>6} "
                 f"{'argmax':>7}")
     logger.info(f"{'BASE':>{len(head)}} {base_err:>9.4f} {'':>9} {base_acc:>7.3f} "
                 f"{'':>7} {'':>6} {base_am:>7.3f}")
