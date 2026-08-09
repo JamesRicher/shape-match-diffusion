@@ -1,0 +1,21 @@
+{
+  "name": "smal_mpnn_512_FMD_xyz_snrfd_tw_gt_indep_light",
+  "checkpoint": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/mpnn_diffusion/smal_mpnn_512_FMD_xyz_snrfd_tw_gt_indep_light/models/final.pth",
+  "n_pairs": 380,
+  "fps_metric": "euclidean",
+  "feat_source": "diffnet",
+  "degradation": null,
+  "nn_baseline": {
+    "dense_MGE": 0.08752010762691498,
+    "median": 0.03432638198137283,
+    "p90": 0.1344689577817917,
+    "gross_gt_0.1": 0.13201134102935405
+  },
+  "hungarian": {
+    "dense_MGE": 0.07559553533792496,
+    "median": 0.03414883464574814,
+    "p90": 0.11487612128257751,
+    "gross_gt_0.1": 0.11824714782585159
+  },
+  "out_dir": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/mpnn_diffusion/smal_mpnn_512_FMD_xyz_snrfd_tw_gt_indep_light/results/benchmarks/smal_mpnn_512_FMD_xyz_snrfd_tw_gt_indep_light"
+}

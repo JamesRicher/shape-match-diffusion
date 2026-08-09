@@ -199,8 +199,13 @@ def parse_args():
     p.add_argument("--betas", type=float, nargs="+", default=[0.5, 1.0, 2.0])
     p.add_argument("--sigmas", type=float, nargs="+", default=[0.02, 0.05, 0.1])
     p.add_argument("--gs", type=float, nargs="+", default=[1.0, 2.0, 4.0])
-    p.add_argument("--k_cand", type=int, nargs="+", default=[8])
-    p.add_argument("--k_graph", type=int, nargs="+", default=[8])
+    p.add_argument("--k_cand", type=int, nargs="+", default=None,
+                   help="candidates per vertex (Kc = 2x this). Default: the denoiser's "
+                        "k_feat, so the prototype's candidate sets match the cross stage's")
+    p.add_argument("--k_graph", type=int, nargs="+", default=None,
+                   help="message-graph degree. Default: the denoiser's k_intra -- in-loop, "
+                        "denoiser.py hands BP the ALREADY-BUILT intra graph, so tuning at a "
+                        "different degree would not transfer (geometric evidence scales with k)")
     p.add_argument("--sweeps", type=int, nargs="+", default=[3],
                    help="BP sweeps; pass several (e.g. 1 2 4 8 16) for the test-time "
                         "inference-scaling curve, the figure that separates BP from an MPNN")
@@ -228,10 +233,17 @@ if __name__ == "__main__":
     args = parse_args()
     model, test_set, ckpt = _load(args.config, args.checkpoint, args.device)
     N = min(args.num_pairs, len(test_set))
+    # Default the two structural degrees to the denoiser's own, so the post-process
+    # prototype is tuned on the graph the in-loop version will actually be handed.
+    den = (load_yaml(args.config).get("networks") or {}).get("denoiser") or {}
+    k_graph = args.k_graph or [den.get("k_intra", 8)]
+    k_cand = args.k_cand or [den.get("k_feat", 8)]
     axes = {"beta": args.betas, "sigma": args.sigmas, "g": args.gs, "tau": args.taus,
             "delta": args.deltas, "s": args.slacks, "sweeps": args.sweeps,
-            "k_cand": args.k_cand, "k_graph": args.k_graph}
+            "k_cand": k_cand, "k_graph": k_graph}
     n_grid = int(np.prod([len(v) for v in axes.values()]))
+    get_root_logger().info(f"k_graph={k_graph} (denoiser k_intra={den.get('k_intra')}), "
+                           f"k_cand={k_cand} (denoiser k_feat={den.get('k_feat')})")
     get_root_logger().info(f"loaded {ckpt}; {len(test_set)} test pairs, sweeping "
                            f"{n_grid} grid points on {N} pairs "
                            f"({'random, seed ' + str(args.pair_seed) if args.pair_seed is not None else 'sequential'})")

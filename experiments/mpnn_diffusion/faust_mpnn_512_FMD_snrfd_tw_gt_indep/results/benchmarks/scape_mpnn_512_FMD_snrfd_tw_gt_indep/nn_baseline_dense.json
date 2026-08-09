@@ -1,0 +1,21 @@
+{
+  "name": "scape_mpnn_512_FMD_snrfd_tw_gt_indep",
+  "checkpoint": "experiments/mpnn_diffusion/faust_mpnn_512_FMD_snrfd_tw_gt_indep/models/final.pth",
+  "n_pairs": 380,
+  "fps_metric": "euclidean",
+  "feat_source": "diffnet",
+  "degradation": null,
+  "nn_baseline": {
+    "dense_MGE": 0.06525054574012756,
+    "median": 0.027122577652335167,
+    "p90": 0.08601309359073639,
+    "gross_gt_0.1": 0.08303368421052632
+  },
+  "hungarian": {
+    "dense_MGE": 0.052797526121139526,
+    "median": 0.02609740011394024,
+    "p90": 0.07503893226385117,
+    "gross_gt_0.1": 0.06291052631578947
+  },
+  "out_dir": "/Users/james/Documents/Imperial/ShapeMatching/Code/Ideas/diffusion-transformer/experiments/mpnn_diffusion/faust_mpnn_512_FMD_snrfd_tw_gt_indep/results/benchmarks/scape_mpnn_512_FMD_snrfd_tw_gt_indep"
+}

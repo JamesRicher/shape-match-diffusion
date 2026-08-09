@@ -228,8 +228,8 @@ def _summary(err):
 
 @torch.no_grad()
 def run(config_path, checkpoint, device, fps_metric, num_pairs, seed, with_diffusion, with_hungarian,
-        degrade_mode=None, degrade_strength=0.0):
-    model, dataset, opt, ckpt = _build(config_path, checkpoint, device, fps_metric)
+        degrade_mode=None, degrade_strength=0.0, overrides=None, tag=None):
+    model, dataset, opt, ckpt = _build(config_path, checkpoint, device, fps_metric, overrides=overrides)
     name = opt['name']
     torch.manual_seed(seed)                                          # reproducible noise draws
     deg_tag = _install_feature_degradation(model, degrade_mode, degrade_strength)
@@ -254,6 +254,7 @@ def run(config_path, checkpoint, device, fps_metric, num_pairs, seed, with_diffu
     summary = {'name': name, 'checkpoint': ckpt, 'n_pairs': len(idxs),
                'fps_metric': getattr(dataset, 'fps_metric', 'config'),
                'feat_source': getattr(model.densifier, 'feat_source', None),
+               'overrides': list(overrides or []),
                'degradation': (None if degrade_mode is None
                                else {'mode': degrade_mode, 'strength': degrade_strength}),
                'nn_baseline': _summary(err['nn'])}                  # key kept for older result files
@@ -267,7 +268,10 @@ def run(config_path, checkpoint, device, fps_metric, num_pairs, seed, with_diffu
 
     out_dir = _benchmark_dir(ckpt, name)
     os.makedirs(out_dir, exist_ok=True)
-    stem = 'nn_baseline_dense' + (f'__{deg_tag}' if deg_tag else '')  # keep clean run un-clobbered
+    # keep clean/degraded/overridden runs un-clobbered: the out dir is keyed by the eval config
+    # name alone, so two runs that differ only by --set (e.g. DT4D intra vs inter) need --tag.
+    stem = ('nn_baseline_dense' + (f'__{tag}' if tag else '')
+            + (f'__{deg_tag}' if deg_tag else ''))
     np.savez(os.path.join(out_dir, f'{stem}.npz'),
              nn_error=err['nn'],
              hungarian_error=err.get('hungarian', np.array([])),
@@ -315,6 +319,12 @@ def main():
     p.add_argument('--fps-metric', choices=('config', 'geodesic', 'euclidean'), default='config',
                    help='override the dataset FPS metric (default: whatever the config says)')
     p.add_argument('--device', default=None, help="'cuda' / 'cpu'; auto-detected when omitted")
+    p.add_argument('--set', dest='overrides', action='append', default=[], metavar='KEY=VALUE',
+                   help="evaluate.py-style config override, repeatable (e.g. "
+                        "--set datasets.test.inter_class=false)")
+    p.add_argument('--tag', default=None,
+                   help='suffix for the output filenames; use it whenever --set changes the eval '
+                        'set, since the output dir is keyed by config name alone')
     deg = p.add_mutually_exclusive_group()
     deg.add_argument('--feature-noise', type=float, default=None, metavar='SIGMA',
                      help='corrupt extractor features (all arms) with additive Gaussian noise; '
@@ -334,7 +344,7 @@ def main():
 
     s = run(args.config, args.checkpoint, args.device, args.fps_metric,
             args.num_pairs, args.seed, not args.no_diffusion, not args.no_hungarian,
-            degrade_mode, degrade_strength)
+            degrade_mode, degrade_strength, args.overrides, args.tag)
     _print(s)
     print(f"\nper-pair errors + JSON under: {s['out_dir']}/")
 
