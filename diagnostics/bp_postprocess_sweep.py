@@ -30,6 +30,7 @@ from scipy.optimize import linear_sum_assignment
 from tqdm import tqdm
 
 from datasets import build_dataset
+from evaluate import apply_override
 from models import build_model
 from utils.logger import get_root_logger
 from utils.options import load_yaml, resolve_experiment_paths
@@ -38,8 +39,13 @@ from networks.mpnn.belief_prop import bp_refine
 import os
 
 
-def _load(config, checkpoint, device):
+def _load(config, checkpoint, device, overrides=None):
+    """overrides: evaluate.py-style 'dotted.key=value' strings applied before anything is
+    built, so eval-set knobs can be switched from the CLI (e.g. DT4D's intra/inter regimes,
+    datasets.test.inter_class=false) without copying the YAML."""
     opt = load_yaml(config)
+    for spec in (overrides or []):
+        apply_override(opt, spec)
     if device:
         opt["device"] = device
     opt["is_train"] = False
@@ -223,6 +229,8 @@ def parse_args():
     p.add_argument("--cache_dir", default=None,
                    help="memoise model.sample() here (float16, ~0.5MB/pair); makes repeat "
                         "sweeps cheap and pins the baseline so runs are comparable")
+    p.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE",
+                   help="config override, repeatable (e.g. --set datasets.test.inter_class=false)")
     p.add_argument("--cache_tag", default="bp",
                    help="prefix for cache files; CHANGE IT when the checkpoint or config "
                         "changes, or stale samples will be reused silently")
@@ -231,7 +239,7 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    model, test_set, ckpt = _load(args.config, args.checkpoint, args.device)
+    model, test_set, ckpt = _load(args.config, args.checkpoint, args.device, args.overrides)
     N = min(args.num_pairs, len(test_set))
     # Default the two structural degrees to the denoiser's own, so the post-process
     # prototype is tuned on the graph the in-loop version will actually be handed.

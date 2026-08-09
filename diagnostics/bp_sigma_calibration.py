@@ -45,6 +45,7 @@ from tqdm import tqdm
 
 from datasets import build_dataset
 from diagnostics.bp_postprocess_sweep import _load
+from evaluate import apply_override
 from networks.mpnn.belief_prop import _gather_rows, build_candidate_sets, edge_distortion
 from networks.mpnn.geometry import knn_from_dist
 from utils.logger import get_root_logger
@@ -191,9 +192,21 @@ def _candidate_stats(cand, cmask, nbr, D_src, D_tgt, sigmas, delta, keep, pred=N
 
 
 @torch.no_grad()
-def run(test_set, model, num_pairs, k_graph, k_cand, sigmas, delta, max_keep=400_000):
+def run(test_set, model, num_pairs, k_graph, k_cand, sigmas, delta, max_keep=400_000,
+        pair_seed=None):
     logger = get_root_logger()
     N = min(num_pairs, len(test_set))
+    # Sequential pairs are product(range(n), repeat=2), so the first N all share ONE source
+    # shape -- sigma would be calibrated to a single geometry. Acute on heterogeneous sets
+    # (DT4D inter: every pair has crypto at one end, and the first N share one crypto frame).
+    if pair_seed is None:
+        pairs = list(range(N))
+        if N < len(test_set):
+            logger.info("WARNING: sequential pairs are one source shape vs the rest; pass "
+                        "--pair_seed for a representative sigma")
+    else:
+        pairs = sorted(np.random.default_rng(pair_seed).choice(
+            len(test_set), size=N, replace=False).tolist())
     Kc = 2 * k_cand                                              # width of the real sets
     modes = (["model"] if model is not None else []) + ["nearmiss", "random"]
     acc = {m: [] for m in modes}
@@ -204,7 +217,7 @@ def run(test_set, model, num_pairs, k_graph, k_cand, sigmas, delta, max_keep=400
         v = t.detach().cpu().numpy().ravel()
         return v if v.size <= max_keep else rng.choice(v, max_keep, replace=False)
 
-    for idx in tqdm(range(N), desc="BP sigma calibration"):
+    for idx in tqdm(pairs, desc="BP sigma calibration"):
         data = test_set[idx]
         logits = None
         if model is not None:
@@ -235,7 +248,8 @@ def run(test_set, model, num_pairs, k_graph, k_cand, sigmas, delta, max_keep=400
                                            sigmas, delta, keep, pred))
 
     cat = lambda vs: np.concatenate(vs)
-    out = {"num_pairs": N, "k_graph": k_graph, "Kc": Kc, "delta": delta,
+    out = {"num_pairs": N, "pair_seed": pair_seed, "pairs": pairs,
+           "k_graph": k_graph, "Kc": Kc, "delta": delta,
            "mode": "model" if model is not None else "model-free",
            "gt_distortion": _q(cat(gt_dist)), "candidates": {}}
     raw = {"gt_dist": cat(gt_dist), "modes": {}}
@@ -359,6 +373,11 @@ def parse_args():
     p.add_argument("--checkpoint", default=None)
     p.add_argument("--device", default=None)
     p.add_argument("--num_pairs", type=int, default=20)
+    p.add_argument("--pair_seed", type=int, default=None,
+                   help="sample --num_pairs test pairs at random with this seed; without it "
+                        "the first N are used, and those all share one source shape")
+    p.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE",
+                   help="config override, repeatable (e.g. --set datasets.test.inter_class=false)")
     p.add_argument("--k_graph", type=int, default=8)
     p.add_argument("--k_cand", type=int, default=8,
                    help="per-source candidates (model mode uses k_logit=k_feat=k_cand)")
@@ -373,13 +392,16 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     if args.with_model:
-        model, test_set, ckpt = _load(args.config, args.checkpoint, args.device)
+        model, test_set, ckpt = _load(args.config, args.checkpoint, args.device, args.overrides)
         get_root_logger().info(f"loaded {ckpt}")
     else:
         model = None
-        test_set = build_dataset(load_yaml(args.config)["datasets"]["test"])
+        opt = load_yaml(args.config)
+        for spec in args.overrides:
+            apply_override(opt, spec)
+        test_set = build_dataset(opt["datasets"]["test"])
     summary, raw = run(test_set, model, args.num_pairs, args.k_graph, args.k_cand,
-                       sorted(args.sigmas), args.delta)
+                       sorted(args.sigmas), args.delta, pair_seed=args.pair_seed)
     if args.out:
         _figure(summary, raw, sorted(args.sigmas), args.out)
     if args.json:
