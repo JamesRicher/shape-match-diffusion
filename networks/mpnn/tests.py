@@ -13,7 +13,7 @@ Run: python -m networks.mpnn.tests
 import torch
 
 from networks import build_network
-from utils.sinkhorn import sample_doubly_stochastic, log_sinkhorn
+from utils.sinkhorn import sample_doubly_stochastic, log_sinkhorn, safe_log
 
 
 def project(u: torch.Tensor, n_iters: int = 50) -> torch.Tensor:
@@ -35,13 +35,22 @@ def _make_inputs(B: int, n: int, feat_dim: int):
     return fx, fy, Dx, Dy, P_t, t
 
 
+# BP settings for the third pass of the battery: every structural property the trunk
+# guarantees must survive with belief propagation writing to the state.
+BP_CFG = {"k_logit": 4, "k_feat": 4, "sigma": 0.15, "n_sweeps": 2}
+
+
+def _tag(cross_type, bp):
+    return cross_type + ("+bp" if bp else "")
+
+
 def _build(cross_type, feat_dim=8, dim=32, heads=4, depth=3, k_intra=5,
-           k_feat=4, k_state=4, n_rbf=8):
+           k_feat=4, k_state=4, n_rbf=8, bp=None):
     return build_network({
         "type": "MPNNMatrixDenoiser",
         "feat_dim": feat_dim, "dim": dim, "heads": heads, "depth": depth,
         "cross_type": cross_type, "k_intra": k_intra, "k_feat": k_feat,
-        "k_state": k_state, "n_rbf": n_rbf,
+        "k_state": k_state, "n_rbf": n_rbf, "bp": bp,
     }).eval()
 
 
@@ -57,35 +66,35 @@ def _report(name, err, tol=1e-4):
     return ok
 
 
-def test_identity_at_init(cross_type):
+def test_identity_at_init(cross_type, bp=None):
     torch.manual_seed(0)
-    net = _build(cross_type)
+    net = _build(cross_type, bp=bp)
     fx, fy, Dx, Dy, P_t, t = _make_inputs(2, 16, 8)
     with torch.no_grad():
         out = net(P_t, fx, fy, Dx, Dy, t)
-    return _report(f"[{cross_type}] identity at init", (project(out) - P_t).abs().max().item(),
+    return _report(f"[{_tag(cross_type, bp)}] identity at init", (project(out) - P_t).abs().max().item(),
                    tol=1e-3)   # safe_log's eps floor bounds the round trip
 
 
-def test_polytope_compliance(cross_type):
+def test_polytope_compliance(cross_type, bp=None):
     torch.manual_seed(1)
-    net = _build(cross_type)
+    net = _build(cross_type, bp=bp)
     _perturb(net)
     fx, fy, Dx, Dy, P_t, t = _make_inputs(2, 16, 8)
     with torch.no_grad():
         out = project(net(P_t, fx, fy, Dx, Dy, t))
-    ok = _report(f"[{cross_type}] polytope: row marginals", (out.sum(-1) - 1).abs().max().item())
-    ok &= _report(f"[{cross_type}] polytope: col marginals", (out.sum(-2) - 1).abs().max().item())
+    ok = _report(f"[{_tag(cross_type, bp)}] polytope: row marginals", (out.sum(-1) - 1).abs().max().item())
+    ok &= _report(f"[{_tag(cross_type, bp)}] polytope: col marginals", (out.sum(-2) - 1).abs().max().item())
     nonneg = out.min().item()
-    print(f"[{'PASS' if nonneg >= 0 else 'FAIL'}] [{cross_type}] polytope: nonnegativity"
+    print(f"[{'PASS' if nonneg >= 0 else 'FAIL'}] [{_tag(cross_type, bp)}] polytope: nonnegativity"
           f"{'':<14} min={nonneg:.2e}")
     return ok and nonneg >= 0.0
 
 
-def test_full_permutation_equivariance(cross_type):
+def test_full_permutation_equivariance(cross_type, bp=None):
     """FULL relabeling of both shapes (not just an anchor-preserving tail)."""
     torch.manual_seed(2)
-    net = _build(cross_type)
+    net = _build(cross_type, bp=bp)
     _perturb(net, 0.05)
     B, n, feat_dim = 2, 16, 8
     fx, fy, Dx, Dy, P_t, t = _make_inputs(B, n, feat_dim)
@@ -96,13 +105,13 @@ def test_full_permutation_equivariance(cross_type):
         out_perm = net(P_t[:, py][:, :, px], fx[:, px], fy[:, py],
                        Dx[:, px][:, :, px], Dy[:, py][:, :, py], t)
     expected = out[:, py][:, :, px]
-    return _report(f"[{cross_type}] FULL permutation equivariance",
+    return _report(f"[{_tag(cross_type, bp)}] FULL permutation equivariance",
                    (out_perm - expected).abs().max().item())
 
 
-def test_size_agnosticism(cross_type):
+def test_size_agnosticism(cross_type, bp=None):
     torch.manual_seed(3)
-    net = _build(cross_type)
+    net = _build(cross_type, bp=bp)
     ok = True
     for n in (12, 24):
         fx, fy, Dx, Dy, P_t, t = _make_inputs(2, n, 8)
@@ -110,37 +119,37 @@ def test_size_agnosticism(cross_type):
             out = net(P_t, fx, fy, Dx, Dy, t)
         shape_ok = tuple(out.shape) == (2, n, n)
         marg_ok = (project(out, n_iters=100).sum(-1) - 1).abs().max().item() < 1e-4
-        print(f"[{'PASS' if shape_ok and marg_ok else 'FAIL'}] [{cross_type}] size agnosticism "
+        print(f"[{'PASS' if shape_ok and marg_ok else 'FAIL'}] [{_tag(cross_type, bp)}] size agnosticism "
               f"n={n:<2}{'':<21} shape={tuple(out.shape)} marg_ok={marg_ok}")
         ok &= shape_ok and marg_ok
     return ok
 
 
-def test_pair_swap_symmetry(cross_type):
+def test_pair_swap_symmetry(cross_type, bp=None):
     torch.manual_seed(4)
-    net = _build(cross_type)
+    net = _build(cross_type, bp=bp)
     _perturb(net)
     fx, fy, Dx, Dy, P_t, t = _make_inputs(2, 16, 8)
     with torch.no_grad():
         out = net(P_t, fx, fy, Dx, Dy, t)
         out_swap = net(P_t.transpose(-1, -2), fy, fx, Dy, Dx, t)
-    return _report(f"[{cross_type}] pair-swap symmetry (logits)",
+    return _report(f"[{_tag(cross_type, bp)}] pair-swap symmetry (logits)",
                    (out_swap - out.transpose(-1, -2)).abs().max().item())
 
 
-def test_rigid_motion_invariance(cross_type):
+def test_rigid_motion_invariance(cross_type, bp=None):
     import inspect
-    params = inspect.signature(_build(cross_type).forward).parameters
+    params = inspect.signature(_build(cross_type, bp=bp).forward).parameters
     banned = {"coords", "xyz", "verts", "pos", "X", "Y"}
     clean = banned.isdisjoint(params)
-    print(f"[{'PASS' if clean else 'FAIL'}] [{cross_type}] rigid-motion: intrinsic-only "
+    print(f"[{'PASS' if clean else 'FAIL'}] [{_tag(cross_type, bp)}] rigid-motion: intrinsic-only "
           f"args={list(params)}")
     return clean
 
 
-def test_gradients_flow(cross_type):
+def test_gradients_flow(cross_type, bp=None):
     torch.manual_seed(5)
-    net = _build(cross_type).train()
+    net = _build(cross_type, bp=bp).train()
     _perturb(net, 0.05)
     fx, fy, Dx, Dy, P_t, t = _make_inputs(2, 16, 8)
     out = net(P_t, fx, fy, Dx, Dy, t)
@@ -153,9 +162,115 @@ def test_gradients_flow(cross_type):
     # everything trainable must receive gradient (gates are perturbed off zero,
     # so every pathway is live; dead params indicate dead compute)
     ok = n_with == n_tot
-    print(f"[{'PASS' if ok else 'FAIL'}] [{cross_type}] gradients flow"
+    print(f"[{'PASS' if ok else 'FAIL'}] [{_tag(cross_type, bp)}] gradients flow"
           f"{'':<30} {n_with}/{n_tot} params")
     return ok
+
+
+# --------------------------------------------------------------------------- #
+# BP-specific properties (notes/BP-loop-design.md)
+# --------------------------------------------------------------------------- #
+def test_bp_disabled_by_default():
+    """`bp: null` must leave no parameters and no code path behind."""
+    off, on = _build("mpnn"), _build("mpnn", bp=BP_CFG)
+    n_off = sum(p.numel() for p in off.parameters())
+    n_on = sum(p.numel() for p in on.parameters())
+    ok = off.bp is None and on.bp is not None and n_on > n_off
+    print(f"[{'PASS' if ok else 'FAIL'}] [bp] disabled by default"
+          f"{'':<25} params {n_off} -> {n_on} (+{n_on - n_off})")
+    return ok
+
+
+def test_bp_gates_at_init():
+    """g = 0 and the agreement gate w = 1 exactly at init (identity + calibrated g)."""
+    net = _build("mpnn", bp=BP_CFG)
+    c = torch.randn(4, 32)
+    blk = net.bp.blocks[0]
+    with torch.no_grad():
+        g = blk.g_scale * blk.g_head(c)
+        w = blk._gate(torch.rand(4, 16), c)
+        beta = torch.nn.functional.softplus(blk.beta_head(c))
+    ok = _report("[bp] output gate g = 0 at init", g.abs().max().item())
+    ok &= _report("[bp] agreement gate w = 1 at init", (w - 1).abs().max().item())
+    ok &= _report("[bp] beta = beta_init, constant in t", (beta - 0.5).abs().max().item())
+    return ok
+
+
+def test_bp_writes_when_gated_on():
+    """With g forced non-zero the state must actually move (the block is not inert)."""
+    torch.manual_seed(6)
+    net = _build("mpnn", bp=BP_CFG)
+    fx, fy, Dx, Dy, P_t, t = _make_inputs(2, 16, 8)
+    with torch.no_grad():
+        base = net(P_t, fx, fy, Dx, Dy, t)
+        for blk in net.bp.blocks:
+            blk.g_head[-1].bias.fill_(0.5)
+        moved = net(P_t, fx, fy, Dx, Dy, t)
+    d = (moved - base).abs().max().item()
+    ok = d > 1e-4 and torch.isfinite(moved).all()
+    print(f"[{'PASS' if ok else 'FAIL'}] [bp] writes when gated on"
+          f"{'':<27} max|Δu|={d:.3e}")
+    return ok
+
+
+def test_bp_residual_unary_tracking():
+    """u_bp accumulates exactly what BP wrote, so u - u_bp excludes BP's own history.
+
+    Drives the stack by hand for two blocks and checks the accumulator against the
+    writes it returned (notes/bp_implementation_and_exclusion.md §4.2).
+    """
+    torch.manual_seed(7)
+    net = _build("mpnn", bp=BP_CFG)
+    with torch.no_grad():
+        for blk in net.bp.blocks:
+            blk.g_head[-1].bias.fill_(0.5)
+    fx, fy, Dx, Dy, P_t, t = _make_inputs(2, 16, 8)
+    idx_x, _ = net._geo(Dx)
+    idx_y, _ = net._geo(Dy)
+    geo_x, geo_y = (idx_x, Dx), (idx_y, Dy)
+    with torch.no_grad():
+        c = net.spine(t)
+        u = safe_log(P_t)
+        st = net.bp.init_state(u, fx, fy, geo_x, geo_y)
+        ok = _report("[bp] u_bp starts at zero", st["u_bp"].abs().max().item())
+        writes = torch.zeros_like(u)
+        for i in (0, 1):
+            u_new, st = net.bp(i, u, st, fx, fy, geo_x, geo_y, c)
+            writes = writes + (u_new - u)
+            u = u_new + 0.1 * torch.randn_like(u)   # stand in for other blocks' writes
+    return ok and _report("[bp] u_bp == sum of BP's own writes",
+                          (st["u_bp"] - writes).abs().max().item(), tol=1e-5)
+
+
+def test_bp_sweep_count_override():
+    """Test-time inference effort must be settable without touching weights."""
+    net = _build("mpnn", bp=BP_CFG)
+    net.bp.set_n_sweeps(9)
+    ok = all(b.n_sweeps == 9 for b in net.bp.blocks)
+    fx, fy, Dx, Dy, P_t, t = _make_inputs(1, 16, 8)
+    with torch.no_grad():
+        finite = torch.isfinite(net(P_t, fx, fy, Dx, Dy, t)).all().item()
+    print(f"[{'PASS' if ok and finite else 'FAIL'}] [bp] sweep count override"
+          f"{'':<28} n_sweeps=9 finite={finite}")
+    return ok and finite
+
+
+def test_bp_checkpoint_equivalence():
+    """Gradient checkpointing must change memory, not values or gradients."""
+    torch.manual_seed(8)
+    outs, grads = [], []
+    for ckpt in (False, True):
+        torch.manual_seed(8)
+        net = _build("mpnn", bp={**BP_CFG, "checkpoint": ckpt}).train()
+        _perturb(net, 0.05)
+        fx, fy, Dx, Dy, P_t, t = _make_inputs(2, 16, 8)
+        out = net(P_t, fx, fy, Dx, Dy, t)
+        out.sum().backward()
+        outs.append(out.detach())
+        grads.append(net.bp.blocks[0].g_head[-1].weight.grad.clone())
+    ok = _report("[bp] checkpoint: same forward", (outs[0] - outs[1]).abs().max().item())
+    return ok and _report("[bp] checkpoint: same gradients",
+                          (grads[0] - grads[1]).abs().max().item(), tol=1e-5)
 
 
 if __name__ == "__main__":
@@ -169,8 +284,16 @@ if __name__ == "__main__":
         test_gradients_flow,
     ]
     results = []
-    for cross_type in ("attn", "mpnn"):
-        print(f"\n=== cross_type = {cross_type} ===")
-        results += [t(cross_type) for t in tests]
+    for cross_type, bp in (("attn", None), ("mpnn", None), ("mpnn", BP_CFG)):
+        print(f"\n=== cross_type = {_tag(cross_type, bp)} ===")
+        results += [t(cross_type, bp) for t in tests]
+
+    print("\n=== belief propagation ===")
+    results += [t() for t in (test_bp_disabled_by_default,
+                              test_bp_gates_at_init,
+                              test_bp_writes_when_gated_on,
+                              test_bp_residual_unary_tracking,
+                              test_bp_sweep_count_override,
+                              test_bp_checkpoint_equivalence)]
     print(f"\n{sum(results)}/{len(results)} property groups passed")
     raise SystemExit(0 if all(results) else 1)

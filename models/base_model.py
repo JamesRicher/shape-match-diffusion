@@ -391,7 +391,22 @@ class BaseModel:
                 continue
             net_state_dict = {k.replace('module.', ''): v
                               for k, v in resume_state['networks'][name].items()}
-            self.networks[name].load_state_dict(net_state_dict)
+            try:
+                self.networks[name].load_state_dict(net_state_dict)
+            except RuntimeError:
+                # Fine-tuning a checkpoint from BEFORE a module was added (e.g. enabling
+                # the BP subsystem on a trained matcher): keep the strict load as the
+                # normal path, but fall back to a partial one that names every key it
+                # skipped, so a genuine architecture mismatch is loud rather than silent.
+                res = self.networks[name].load_state_dict(net_state_dict, strict=False)
+                logger.warning(
+                    f'Network {name}: partial resume. '
+                    f'{len(res.missing_keys)} missing (kept at init), '
+                    f'{len(res.unexpected_keys)} unexpected (ignored).')
+                for k in res.missing_keys:
+                    logger.warning(f'  missing:    {k}')
+                for k in res.unexpected_keys:
+                    logger.warning(f'  unexpected: {k}')
             if verbose:
                 logger.info(f'Resuming network: {name}')
 

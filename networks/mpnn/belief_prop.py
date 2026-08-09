@@ -47,24 +47,36 @@ def _dedupe_mask(cand: torch.Tensor) -> torch.Tensor:
     return ~is_dup
 
 
-def build_candidate_sets(logits, feats_x, feats_y, k_logit, k_feat):
+def build_candidate_sets(logits, feats_x, feats_y, k_logit, k_feat, feat_cand=None):
     """Stage 0: per-vertex candidate labels = top-k logits ∪ feature-kNN, deduped.
 
     Returns cand_idx (B, n, Kc), cand_mask (B, n, Kc) with Kc = k_logit + k_feat.
     Slack is NOT included here (handled as a separate column in the potentials).
+
+    feat_cand: precomputed (B, n, k_feat) feature-kNN indices. The feature half is
+    static for a whole denoiser forward (features don't change between blocks) while
+    the logit half must be refreshed, so the in-loop caller computes it once and passes
+    it in; None recomputes it here.
     """
     top_l = logits.topk(min(k_logit, logits.shape[-1]), dim=-1).indices
-    d2 = torch.cdist(feats_x, feats_y)
-    top_f = d2.topk(min(k_feat, feats_y.shape[1]), dim=-1, largest=False).indices
-    cand = torch.cat([top_l, top_f], dim=-1)                     # (B, n, Kc)
+    if feat_cand is None:
+        d2 = torch.cdist(feats_x, feats_y)
+        feat_cand = d2.topk(min(k_feat, feats_y.shape[1]), dim=-1, largest=False).indices
+    cand = torch.cat([top_l, feat_cand], dim=-1)                 # (B, n, Kc)
     return cand, _dedupe_mask(cand)
 
 
-def _unary(logits, cand_idx, cand_mask, beta, s):
-    """Stage 1: φ (B, n, Kc+1), last column = slack. Held fixed across sweeps."""
-    phi_real = beta * torch.gather(logits, -1, cand_idx)         # (B, n, Kc)
+def _unary(theta, cand_idx, cand_mask, s):
+    """Stage 1: φ (B, n, Kc+1), last column = slack. Held fixed across sweeps.
+
+    theta is the ALREADY-SCALED unary field (β·logits for the post-process; for the
+    in-loop block β·(u − u_bp), the residual unary of
+    notes/bp_implementation_and_exclusion.md §4.2). Folding β in at the caller lets it
+    be a per-sample tensor without threading a scale through the potentials.
+    """
+    phi_real = torch.gather(theta, -1, cand_idx)                 # (B, n, Kc)
     phi_real = phi_real.masked_fill(~cand_mask, NEG_INF)
-    phi_slack = torch.full(phi_real.shape[:-1] + (1,), float(s), device=logits.device)
+    phi_slack = torch.full(phi_real.shape[:-1] + (1,), float(s), device=theta.device)
     phi = torch.cat([phi_real, phi_slack], dim=-1)
     return phi - torch.logsumexp(phi, dim=-1, keepdim=True)
 
@@ -77,30 +89,31 @@ def _gather_rows(cand_idx, nbr):
     return torch.gather(cand_idx, 1, flat).reshape(B, n, k, Kc)
 
 
-def edge_distortion(cand_idx, nbr, D_x, D_y):
+def edge_distortion(cand_idx, nbr, D_src, D_tgt):
     """Isometric distortion of every candidate pair on every message edge.
 
     For directed edge (i, slot) with source neighbour s = nbr[i,slot], returns
-    d_Y(cand(s)_a, cand(i)_c) - d_X(i, s) as (B, n, k, Kc_a, Kc_c) — the signed quantity
-    the pairwise potential squares. Exposed so diagnostics can calibrate sigma against
-    the exact distortion log ψ sees.
+    d_tgt(cand(s)_a, cand(i)_c) - d_src(i, s) as (B, n, k, Kc_a, Kc_c) — the signed
+    quantity the pairwise potential squares. D_src is the VARIABLE shape's metric (it
+    supplies the message graph and the edge lengths), D_tgt the LABEL shape's. Exposed
+    so diagnostics can calibrate sigma against the exact distortion log ψ sees.
     """
     B, n, Kc = cand_idx.shape
     k = nbr.shape[-1]
-    d_x_edge = torch.gather(D_x, -1, nbr)                        # (B, n, k)
+    d_x_edge = torch.gather(D_src, -1, nbr)                      # (B, n, k)
     cand_s = _gather_rows(cand_idx, nbr)                        # (B, n, k, Kc) source cands
     cand_d = cand_idx.unsqueeze(2).expand(-1, -1, k, -1)        # (B, n, k, Kc) dest cands
 
     # d_Y(source_a, dest_c): gather rows of D_y by source cands, then cols by dest cands
     r_flat = cand_s.reshape(B, n * k * Kc)
-    Dr = torch.gather(D_y, 1, r_flat.unsqueeze(-1).expand(-1, -1, D_y.shape[-1]))
-    Dr = Dr.reshape(B, n, k, Kc, D_y.shape[-1])                 # (B,n,k,Kc_a, m)
+    Dr = torch.gather(D_tgt, 1, r_flat.unsqueeze(-1).expand(-1, -1, D_tgt.shape[-1]))
+    Dr = Dr.reshape(B, n, k, Kc, D_tgt.shape[-1])               # (B,n,k,Kc_a, m)
     c_exp = cand_d.unsqueeze(3).expand(-1, -1, -1, Kc, -1)      # (B,n,k,Kc_a,Kc_c)
     d_y = torch.gather(Dr, -1, c_exp)                          # (B,n,k,Kc_a,Kc_c)
     return d_y - d_x_edge[..., None, None]
 
 
-def _pairwise(cand_idx, cand_mask, nbr, D_x, D_y, sigma, delta):
+def _pairwise(cand_idx, cand_mask, nbr, D_src, D_tgt, sigma, delta):
     """Stage 2: log ψ (B, n, k, Kc+1, Kc+1) per directed edge (source a-axis, dest c-axis).
 
     log ψ = -min((d_Y(a,c) - d_X_edge)^2 / 2σ^2, δ); slack row/col = 0 (compatible with
@@ -110,10 +123,10 @@ def _pairwise(cand_idx, cand_mask, nbr, D_x, D_y, sigma, delta):
     k = nbr.shape[-1]
     Kp1 = Kc + 1
 
-    diff = edge_distortion(cand_idx, nbr, D_x, D_y)
+    diff = edge_distortion(cand_idx, nbr, D_src, D_tgt)
     log_psi_real = -torch.clamp(diff.pow(2) / (2.0 * sigma ** 2), max=float(delta))
 
-    log_psi = torch.zeros(B, n, k, Kp1, Kp1, device=D_x.device)
+    log_psi = torch.zeros(B, n, k, Kp1, Kp1, device=D_src.device)
     log_psi[..., :Kc, :Kc] = log_psi_real
     # Invalidate padded SOURCE rows only (removes them from the logsumexp over senders).
     # Dest columns are deliberately NOT masked: masking them would create all -inf
@@ -149,10 +162,16 @@ def _gather_msg(msg, nbr, rev_slot, valid):
 
 
 def _sweep(phi, log_psi, nbr, rev_slot, valid, src_mask, n_sweeps, tau, alpha):
-    """Stages 3-4: T damped sum-product sweeps. Returns messages msg (B,n,k,Kp1)
-    where msg[i,slot] is the message FROM nbr[i,slot] TO i, over i's label domain."""
+    """Stages 3-4: T damped sum-product sweeps.
+
+    Returns (msg, msg_delta): msg (B,n,k,Kp1) where msg[i,slot] is the message FROM
+    nbr[i,slot] TO i over i's label domain, and msg_delta (B,n) the per-variable max
+    message change on the FINAL sweep — the note's oscillation monitor, and a
+    per-vertex "has BP converged here" statistic for the in-loop gate. Zero when
+    n_sweeps == 0."""
     B, n, k, Kp1 = phi.shape[0], phi.shape[1], nbr.shape[-1], phi.shape[-1]
     msg = torch.zeros(B, n, k, Kp1, device=phi.device)
+    msg_delta = torch.zeros(B, n, device=phi.device)
     for _ in range(n_sweeps):
         H = phi + msg.sum(2)                                   # (B,n,Kp1) incoming aggregate
         H_src = _gather_rows(H, nbr)                           # (B,n,k,Kp1) H at each source
@@ -165,34 +184,45 @@ def _sweep(phi, log_psi, nbr, rev_slot, valid, src_mask, n_sweeps, tau, alpha):
         # transport: new[.,c] = tau * logsumexp_a((h_cav[.,a] + log_psi[.,a,c]) / tau)
         new = tau * torch.logsumexp((h_cav.unsqueeze(-1) + log_psi) / tau, dim=-2)
         new = new - torch.logsumexp(new, dim=-1, keepdim=True)
-        msg = alpha * msg + (1.0 - alpha) * new
-    return msg
+        upd = alpha * msg + (1.0 - alpha) * new
+        # convergence monitor: biggest single-entry move into each variable this sweep
+        msg_delta = (upd - msg).abs().amax(dim=(-1, -2)).detach()
+        msg = upd
+    return msg, msg_delta
 
 
-def bp_refine(logits, feats_x, feats_y, D_x, D_y, *,
-              k_logit=8, k_feat=8, k_graph=8,
-              beta=1.0, sigma=0.05, delta=4.0, tau=1.0, alpha=0.5, s=-4.0, g=1.0,
-              n_sweeps=3, return_info=False):
-    """Single-sided BP refinement of assignment logits (notes/BP-idea.md stages 0-6).
+def bp_delta(theta, cand_idx, cand_mask, nbr, D_src, D_tgt, *,
+             sigma=0.05, delta=4.0, tau=1.0, alpha=0.5, s=-4.0, n_sweeps=3,
+             return_info=False):
+    """The BP core: stages 1-6 on GIVEN candidates/graph -> ungated update Δ.
 
-    logits (B, n_src, n_tgt); feats_* (B, n, d); D_x (B, n_src, n_src); D_y
-    (B, n_tgt, n_tgt). Returns refined logits (B, n_src, n_tgt) = logits + g * Δ where
-    Δ scatters the belief residual onto candidates (slack dropped). With return_info,
-    also returns a dict (beliefs, slack_mass, belief_entropy) for diagnostics.
+    Shared by the post-process (`bp_refine`) and the in-loop block
+    (`networks/mpnn/bp_block.BPBlock`) so there is exactly one implementation of the
+    propagation. Everything the two callers differ on — how candidates are chosen, what
+    the unary field is, how Δ is gated and combined — lives outside.
+
+    Args:
+        theta: (B, n_src, n_tgt) already-scaled unary field (see `_unary`).
+        cand_idx, cand_mask: (B, n_src, Kc) candidate labels and validity.
+        nbr: (B, n_src, k) message graph on the variable shape.
+        D_src: (B, n_src, n_src) variable-shape metric (edge lengths).
+        D_tgt: (B, n_tgt, n_tgt) label-shape metric.
+    Returns:
+        Δ (B, n_src, n_tgt), the mean-centred belief residual scattered onto candidates
+        (slack dropped, zero off-candidate). With return_info, also a dict with the
+        normalised `belief` (B, n_src, Kc+1), `slack_mass`, `belief_entropy` and
+        `msg_delta` (max message change on the final sweep — the convergence monitor).
     """
-    cand_idx, cand_mask = build_candidate_sets(logits, feats_x, feats_y, k_logit, k_feat)
-    phi = _unary(logits, cand_idx, cand_mask, beta, s)          # (B,n,Kp1)
-
-    nbr, _ = knn_from_dist(D_x, min(k_graph, D_x.shape[-1] - 1))
-    log_psi = _pairwise(cand_idx, cand_mask, nbr, D_x, D_y, sigma, delta)
+    Kc = cand_idx.shape[-1]
+    phi = _unary(theta, cand_idx, cand_mask, s)                 # (B,n,Kp1)
+    log_psi = _pairwise(cand_idx, cand_mask, nbr, D_src, D_tgt, sigma, delta)
     rev_slot, valid = _reverse_index(nbr)
 
     # source-domain validity per edge (slack column always valid)
-    Kc = cand_idx.shape[-1]
     src_ok = torch.cat([_gather_rows(cand_mask.long(), nbr).bool(),
                         torch.ones(*nbr.shape, 1, dtype=torch.bool, device=nbr.device)], dim=-1)
 
-    msg = _sweep(phi, log_psi, nbr, rev_slot, valid, src_ok, n_sweeps, tau, alpha)
+    msg, msg_delta = _sweep(phi, log_psi, nbr, rev_slot, valid, src_ok, n_sweeps, tau, alpha)
 
     # Stage 6: reintegrate the RESIDUAL (net geometric evidence = summed incoming
     # messages, unary EXCLUDED). Adding the full belief would double-count the unary
@@ -209,18 +239,43 @@ def bp_refine(logits, feats_x, feats_y, D_x, D_y, *,
     cnt = cand_mask.sum(-1, keepdim=True).clamp_min(1)
     mean = (r_real.sum(-1, keepdim=True) / cnt)
     r_real = (r_real - mean).masked_fill(~cand_mask, 0.0)
-    delta_mat = torch.zeros_like(logits)
+    delta_mat = torch.zeros(theta.shape, device=theta.device, dtype=theta.dtype)
     delta_mat.scatter_add_(-1, cand_idx, r_real)
-    refined = logits + g * delta_mat
 
     if not return_info:
-        return refined
-    # Stage 5: beliefs (for diagnostics only — the slack mass and entropy of P(·|i))
+        return delta_mat
+    # Stage 5: beliefs (slack mass, entropy of P(·|i), and the cycle-consistency
+    # partner distribution the in-loop gate reduces to a round-trip score)
     belief = phi + resid
     belief = belief - torch.logsumexp(belief, dim=-1, keepdim=True)
     p = belief.exp().clamp_min(1e-12)
-    return refined, {"beliefs": belief, "slack_mass": p[..., Kc],
-                     "belief_entropy": -(p * p.log()).sum(-1)}
+    return delta_mat, {"belief": belief, "slack_mass": p[..., Kc],
+                       "belief_entropy": -(p * p.log()).sum(-1),
+                       "msg_delta": msg_delta}
+
+
+def bp_refine(logits, feats_x, feats_y, D_x, D_y, *,
+              k_logit=8, k_feat=8, k_graph=8,
+              beta=1.0, sigma=0.05, delta=4.0, tau=1.0, alpha=0.5, s=-4.0, g=1.0,
+              n_sweeps=3, return_info=False):
+    """Single-sided BP refinement of assignment logits (notes/BP-idea.md stages 0-6).
+
+    Thin wrapper over `bp_delta`: build candidates from the logits, run BP with the
+    unary β·logits, add g·Δ. logits (B, n_src, n_tgt); feats_* (B, n, d); D_x
+    (B, n_src, n_src) the VARIABLE shape's metric; D_y (B, n_tgt, n_tgt) the LABEL
+    shape's. Returns refined logits; with return_info, also the diagnostics dict
+    (`beliefs`, `slack_mass`, `belief_entropy`).
+    """
+    cand_idx, cand_mask = build_candidate_sets(logits, feats_x, feats_y, k_logit, k_feat)
+    nbr, _ = knn_from_dist(D_x, min(k_graph, D_x.shape[-1] - 1))
+    out = bp_delta(beta * logits, cand_idx, cand_mask, nbr, D_x, D_y, sigma=sigma,
+                   delta=delta, tau=tau, alpha=alpha, s=s, n_sweeps=n_sweeps,
+                   return_info=return_info)
+    if not return_info:
+        return logits + g * out
+    delta_mat, info = out
+    info["beliefs"] = info["belief"]                            # back-compat key
+    return logits + g * delta_mat, info
 
 
 # --------------------------------------------------------------------------- #

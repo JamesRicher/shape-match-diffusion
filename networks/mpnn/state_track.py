@@ -16,11 +16,14 @@ identity-at-init holds structurally, without the LogitReadout alpha-skip. The
 network is thereby parameterised as "estimate the correction to the current
 assignment".
 
-BP seam: StateWrite.forward takes an optional bp_residual (B, n_y, n_x) — the
-belief-propagation net-evidence term, None until networks/mpnn/belief_prop.py
-exists. The pair-MLP already reserves an input channel for it, so wiring BP in
-later changes no shapes and disturbs no trained-weight semantics (the channel is
-fed zeros meanwhile).
+BP does NOT come through here. StateWrite.forward still accepts a bp_residual
+(B, n_y, n_x) for the reserved pair-MLP channel, but the in-loop belief propagation
+of networks/mpnn/bp_block.py deliberately does not use it: the pair-MLP would mix
+BP's contribution into du nonlinearly, so BP's own stream could not be tracked and
+the block-level exclusion (residual unaries u - u_bp, see
+notes/bp_implementation_and_exclusion.md §4.2) would be unimplementable. BP owns a
+separate gated additive write instead, and this channel stays fed with zeros —
+kept only so the trained-weight layout is unchanged.
 
 Orientation convention throughout: u, P are (B, n_y, n_x), rows = Y (the repo's
 P_t convention). Warps: Y tokens pull back X features through rows of P; X tokens
