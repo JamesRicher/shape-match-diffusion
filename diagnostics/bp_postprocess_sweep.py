@@ -39,10 +39,14 @@ from networks.mpnn.belief_prop import bp_refine
 import os
 
 
-def _load(config, checkpoint, device, overrides=None):
+def _load(config, checkpoint, device, overrides=None, split="test"):
     """overrides: evaluate.py-style 'dotted.key=value' strings applied before anything is
     built, so eval-set knobs can be switched from the CLI (e.g. DT4D's intra/inter regimes,
-    datasets.test.inter_class=false) without copying the YAML."""
+    datasets.test.inter_class=false) without copying the YAML.
+
+    split selects datasets.<split>. Where a split is a LIST of pools (DT4D trains on intra
+    + inter together), the entry whose inter_class matches datasets.test is used, so tuning
+    happens in the same regime that will be reported."""
     opt = load_yaml(config)
     for spec in (overrides or []):
         apply_override(opt, spec)
@@ -55,8 +59,14 @@ def _load(config, checkpoint, device, overrides=None):
     opt["path"]["resume"] = False
     model = build_model(opt)
     model.eval()
-    test_set = build_dataset(opt["datasets"]["test"])
-    return model, test_set, ckpt
+    ds_opt = opt["datasets"][split]
+    if isinstance(ds_opt, (list, tuple)):                        # DT4D: intra + inter pools
+        want = (opt["datasets"].get("test") or {}).get("inter_class")
+        match = [d for d in ds_opt if d.get("inter_class") == want]
+        ds_opt = (match or ds_opt)[0]
+        get_root_logger().info(f"datasets.{split} is a list; using the pool with "
+                               f"inter_class={ds_opt.get('inter_class')} (matching test)")
+    return model, build_dataset(ds_opt), ckpt
 
 
 @torch.no_grad()
@@ -88,8 +98,23 @@ def _cached_sample(model, data, idx, cache_dir, tag):
     return P0
 
 
+HALF_SEED = 12345          # fixed, so 'tune' and 'report' are the same halves in every run
+
+
+def _index_pool(n, pair_split):
+    """Deterministic disjoint halves of the pair list, so hyperparameters selected on one
+    half can be reported on the other. Fixed seed (not --pair_seed) so the partition never
+    moves between runs; --pair_seed still subsamples WITHIN the chosen half."""
+    if pair_split in (None, "none"):
+        return list(range(n))
+    perm = np.random.default_rng(HALF_SEED).permutation(n)
+    half = n // 2
+    return sorted((perm[:half] if pair_split == "tune" else perm[half:]).tolist())
+
+
 @torch.no_grad()
-def run(model, test_set, num_pairs, axes, pair_seed=None, cache_dir=None, tag="bp"):
+def run(model, test_set, num_pairs, axes, pair_seed=None, cache_dir=None, tag="bp",
+        pair_split=None):
     """Sweep the BP scalars over num_pairs test pairs.
 
     axes: dict of lists keyed by AXES; the grid is their product, so any subset can be
@@ -105,12 +130,13 @@ def run(model, test_set, num_pairs, axes, pair_seed=None, cache_dir=None, tag="b
     grid_accs = {k: [] for k in keys}
     grid_argmax = {k: [] for k in keys}
 
-    N = min(num_pairs, len(test_set))
+    pool = _index_pool(len(test_set), pair_split)
+    N = min(num_pairs, len(pool))
     if pair_seed is None:
-        pairs = list(range(N))
+        pairs = pool[:N]
     else:
         rng = np.random.default_rng(pair_seed)
-        pairs = sorted(rng.choice(len(test_set), N, replace=False).tolist())
+        pairs = sorted(rng.choice(pool, N, replace=False).tolist())
     for idx in tqdm(pairs, desc=f"BP sweep ({len(grid)} grid points)"):
         data = test_set[idx]
         P0 = _cached_sample(model, data, idx, cache_dir, tag)
@@ -188,7 +214,7 @@ def run(model, test_set, num_pairs, axes, pair_seed=None, cache_dir=None, tag="b
                     f"improves {b['win_rate']:.2f} of pairs; argmax acc {base_am:.3f} -> "
                     f"{b['argmax_acc']:.3f}")
     summary = {"num_pairs": len(pairs), "pair_seed": pair_seed, "axes": axes,
-               "pairs": list(pairs),
+               "pair_split": pair_split, "pairs": list(pairs),
                "base": {"err": base_err, "acc": base_acc, "argmax_acc": base_am,
                         "per_pair_err": base_per_pair.tolist(),
                         "per_pair_acc": base_accs},
@@ -229,6 +255,13 @@ def parse_args():
     p.add_argument("--cache_dir", default=None,
                    help="memoise model.sample() here (float16, ~0.5MB/pair); makes repeat "
                         "sweeps cheap and pins the baseline so runs are comparable")
+    p.add_argument("--split", default="test", choices=("train", "val", "test"),
+                   help="datasets.<split> to sweep over (default test)")
+    p.add_argument("--pair_split", default="none", choices=("none", "tune", "report"),
+                   help="restrict to a fixed disjoint HALF of the pair list: select "
+                        "hyperparameters on 'tune', quote the final number from 'report'. "
+                        "The partition is seeded independently of --pair_seed, so it never "
+                        "moves between runs")
     p.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE",
                    help="config override, repeatable (e.g. --set datasets.test.inter_class=false)")
     p.add_argument("--cache_tag", default="bp",
@@ -239,7 +272,8 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    model, test_set, ckpt = _load(args.config, args.checkpoint, args.device, args.overrides)
+    model, test_set, ckpt = _load(args.config, args.checkpoint, args.device, args.overrides,
+                                  args.split)
     N = min(args.num_pairs, len(test_set))
     # Default the two structural degrees to the denoiser's own, so the post-process
     # prototype is tuned on the graph the in-loop version will actually be handed.
@@ -252,15 +286,18 @@ if __name__ == "__main__":
     n_grid = int(np.prod([len(v) for v in axes.values()]))
     get_root_logger().info(f"k_graph={k_graph} (denoiser k_intra={den.get('k_intra')}), "
                            f"k_cand={k_cand} (denoiser k_feat={den.get('k_feat')})")
-    get_root_logger().info(f"loaded {ckpt}; {len(test_set)} test pairs, sweeping "
+    get_root_logger().info(f"loaded {ckpt}; {len(test_set)} pairs in datasets.{args.split} "
+                           f"(pair_split={args.pair_split}), sweeping "
                            f"{n_grid} grid points on {N} pairs "
                            f"({'random, seed ' + str(args.pair_seed) if args.pair_seed is not None else 'sequential'})")
     if args.pair_seed is None and N < len(test_set):
         get_root_logger().info("WARNING: sequential pairs are one source shape vs the rest; "
                                "pass --pair_seed or run all pairs for a representative number")
     _, summary = run(model, test_set, args.num_pairs, axes, args.pair_seed,
-                     args.cache_dir, args.cache_tag)
+                     args.cache_dir, args.cache_tag, args.pair_split)
     if args.json:
+        if os.path.dirname(args.json):
+            os.makedirs(os.path.dirname(args.json), exist_ok=True)
         with open(args.json, "w") as f:
             json.dump(summary, f, indent=2)
         get_root_logger().info(f"summary -> {args.json}")

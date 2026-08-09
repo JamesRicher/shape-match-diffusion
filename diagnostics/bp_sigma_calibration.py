@@ -38,6 +38,7 @@ Usage:
 """
 import argparse
 import json
+import os
 
 import numpy as np
 import torch
@@ -402,6 +403,10 @@ if __name__ == "__main__":
         test_set = build_dataset(opt["datasets"]["test"])
     summary, raw = run(test_set, model, args.num_pairs, args.k_graph, args.k_cand,
                        sorted(args.sigmas), args.delta, pair_seed=args.pair_seed)
+    # after run(), so a missing output dir can't throw away a completed calibration
+    for path in (args.out, args.json):
+        if path and os.path.dirname(path):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
     if args.out:
         _figure(summary, raw, sorted(args.sigmas), args.out)
     if args.json:
