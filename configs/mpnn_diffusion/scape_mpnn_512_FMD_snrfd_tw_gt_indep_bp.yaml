@@ -62,7 +62,7 @@ networks:
       checkpoint: true      # recompute BP sweeps in backward (activation memory)
 
 diffusion:
-  eta: 0.1
+  eta: 0.0
   proj_iters: 6
   schedule_s: 0.008
   logsnr_shift: 0.0
@@ -94,7 +94,7 @@ eval:
   dense: false
 
 train:
-  total_epochs: 60
+  total_epochs: 40
   log_freq: 20
   independent_train_prob: 1.0   # (A) full honest independent-FPS training; 0 = bijective (default)
   optims:

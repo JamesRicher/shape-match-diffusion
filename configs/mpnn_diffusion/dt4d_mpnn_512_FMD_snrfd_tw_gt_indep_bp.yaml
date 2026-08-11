@@ -65,7 +65,7 @@ networks:
       checkpoint: true      # recompute BP sweeps in backward (activation memory)
 
 diffusion:
-  eta: 0.1
+  eta: 0.0
   proj_iters: 6
   schedule_s: 0.008
   logsnr_shift: 0.0
@@ -98,7 +98,7 @@ eval:
 
 train:
   # combined pool = 8702 pairs/epoch; 22 epochs ~ FAUST's 30 x ~6300 total-step budget
-  total_epochs: 22
+  total_epochs: 14
   log_freq: 20
   independent_train_prob: 1.0   # (A) full honest independent-FPS training; 0 = bijective (default)
   optims:
