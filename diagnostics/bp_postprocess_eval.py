@@ -18,10 +18,20 @@ reproduces `evaluate.py` exactly and the two columns differ ONLY by the refineme
 Variables are placed on Y (rows of P_t, the repo convention): source features/metric come
 from Y, labels and the label metric from X — matching bp_postprocess_sweep.
 
+Sparse-sampling regimes (--regime), the two evaluate.py reports:
+  bijective   -- sparse Y point j is the GT image of sparse X point j, so sparse
+                 avg_error/acc are defined. GT enters point SELECTION, so the dense MGE it
+                 also yields is optimistic; a dev diagnostic, not a table number.
+  independent -- each shape FPS'd on its own geometry, no GT in selection: the honest
+                 regime evaluate.py reports dense MGE under. No bijective sparse target
+                 exists, so only dense MGE/AUC are produced (needs a densifier).
+Both columns of a comparison always share one regime, so the base->BP delta is meaningful
+in either; only the absolute numbers differ in what they mean.
+
 Usage:
     python -m diagnostics.bp_postprocess_eval -c <config.yaml> [--checkpoint <pth>]
-        [--beta 0.5 --sigma 0.05 --g 4.0] [--num_pairs 40] [--pair_split report]
-        [--set datasets.test.inter_class=false] [--device cuda]
+        [--regime both] [--beta 0.5 --sigma 0.05 --g 4.0] [--num_pairs 40]
+        [--pair_split report] [--set datasets.test.inter_class=false] [--device cuda]
 
 Defaults are the derived scalars (notes/BP-loop-design.md): the sigma calibration's global
 0.05 and the Stage-A sweep optimum beta 0.5 / g 4.0. Per-dataset optima differ (DT4D-inter
@@ -116,6 +126,49 @@ def _loader(dataset, num_pairs, pair_split, pair_seed):
     return _RestoringLoader(loader), pairs
 
 
+def run_regime(model, dataset, loader, regime, out_dir, params, no_baseline, dense):
+    """One baseline-vs-BP comparison under a single sparse-sampling regime (see module doc).
+
+    Returns {'base': metrics, 'bp': metrics}; 'base' is omitted with no_baseline. The honest
+    regime has no bijective sparse GT, so sparse reporting is off there and only dense MGE
+    comes back."""
+    logger = get_root_logger()
+    dataset.independent_fps = (regime == "independent")
+    model.report_sparse = (regime == "bijective")
+    model.report_dense = dense
+    out = {}
+
+    if not no_baseline:
+        logger.info(f"--- [{regime}] baseline (no BP) ---")
+        out["base"] = model.validation(loader, out_dir=os.path.join(out_dir, regime, "base"))
+
+    logger.info(f"--- [{regime}] BP post-process ---")
+    restore = attach_bp(model, params)
+    try:
+        out["bp"] = model.validation(loader, out_dir=os.path.join(out_dir, regime, "bp"))
+    finally:
+        restore()
+    return out
+
+
+def report(results, regime):
+    """Format one regime's base -> BP deltas; metrics the regime doesn't produce are skipped."""
+    keys = [("avg_error", "sparse err", -1), ("acc", "sparse acc", +1),
+            ("dense_error", "dense MGE", -1), ("auc", "dense AUC", +1)]
+    res = results[regime]
+    if "base" not in res:
+        return f"[{regime}] BP: " + json.dumps({k: res['bp'].get(k) for k, _, _ in keys})
+    rows = []
+    for key, label, sign in keys:
+        b, r = res["base"].get(key), res["bp"].get(key)
+        if b is None or r is None:
+            continue
+        rel = (r - b) / b * 100 if b else float("nan")
+        better = "better" if sign * (r - b) > 0 else "worse"
+        rows.append(f"  {label:11s} {b:.4f} -> {r:.4f}  ({rel:+.1f}%, {better})")
+    return f"[{regime}] BP post-process vs baseline:\n" + "\n".join(rows)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -129,6 +182,10 @@ def main():
                    help="deterministic half of the pair list; 'report' is the half NOT "
                         "used to select the scalars")
     p.add_argument("--pair_seed", type=int, default=None)
+    p.add_argument("--regime", default="bijective",
+                   choices=["bijective", "independent", "both"],
+                   help="sparse-sampling regime(s) to evaluate under (see module doc); "
+                        "'independent' is evaluate.py's honest dense-MGE setup")
     p.add_argument("--no_dense", action="store_true", help="sparse error only (no MGE)")
     p.add_argument("--no_baseline", action="store_true", help="skip the un-refined pass")
     p.add_argument("--out", default="diagnostics/results/bp_post_eval")
@@ -147,6 +204,10 @@ def main():
 
     params = {k: getattr(args, k) for k in
               ("beta", "sigma", "g", "tau", "delta", "s", "sweeps", "k_cand", "k_graph")}
+    regimes = ["bijective", "independent"] if args.regime == "both" else [args.regime]
+    if "independent" in regimes and args.no_dense:
+        p.error("--regime independent has only the dense MGE to report; drop --no_dense")
+
     opt, model, ckpt = _load(args.config, args.checkpoint, args.device, args.overrides,
                              dense=not args.no_dense)
     logger = get_root_logger()
@@ -161,34 +222,14 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     results = {"checkpoint": ckpt, "config": args.config, "params": params,
                "pairs": pairs, "pair_split": args.pair_split,
-               "overrides": args.overrides or []}
+               "overrides": args.overrides or [], "regimes": {}}
 
-    if not args.no_baseline:
-        logger.info("--- baseline (no BP) ---")
-        results["base"] = model.validation(loader, out_dir=os.path.join(out_dir, "base"))
+    for regime in regimes:
+        results["regimes"][regime] = run_regime(
+            model, dataset, loader, regime, out_dir, params,
+            no_baseline=args.no_baseline, dense=not args.no_dense)
 
-    logger.info("--- BP post-process ---")
-    restore = attach_bp(model, params)
-    try:
-        results["bp"] = model.validation(loader, out_dir=os.path.join(out_dir, "bp"))
-    finally:
-        restore()
-
-    # ---- report ---- #
-    keys = [("avg_error", "sparse err", -1), ("acc", "sparse acc", +1),
-            ("dense_error", "dense MGE", -1), ("auc", "dense AUC", +1)]
-    if "base" in results:
-        rows = []
-        for key, label, sign in keys:
-            b, r = results["base"].get(key), results["bp"].get(key)
-            if b is None or r is None:
-                continue
-            rel = (r - b) / b * 100 if b else float("nan")
-            better = "better" if sign * (r - b) > 0 else "worse"
-            rows.append(f"  {label:11s} {b:.4f} -> {r:.4f}  ({rel:+.1f}%, {better})")
-        logger.info("BP post-process vs baseline:\n" + "\n".join(rows))
-    else:
-        logger.info(f"BP: {json.dumps({k: results['bp'].get(k) for k, _, _ in keys})}")
+    logger.info("\n".join(report(results["regimes"], r) for r in regimes))
 
     path = os.path.join(out_dir, "summary.json")
     with open(path, "w") as fh:
