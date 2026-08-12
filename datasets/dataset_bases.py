@@ -223,10 +223,16 @@ class SingleShapeDataset(Dataset):
 
 
 class PairShapeDataset(Dataset):
+    """Pairs of shapes drawn from a SingleShapeDataset.
+
+    Two hooks let a benchmark customise what a pair IS without reimplementing the class:
+    :meth:`_build_combinations` decides which (i, j) pairs exist, and :meth:`_pair_gt`
+    rewrites a fetched pair's ground truth. Benchmarks whose GT is per-pair rather than a
+    shared template (SHREC19's .map files) or whose pair set is dictated by split rules
+    (DT4D) need only those two, and inherit sparsification and everything else for free.
+    """
     def __init__(self, dataset, exclude_self=False):
         """
-        Pair Shape Dataset
-
         Args:
             dataset (SingleShapeDataset): single shape dataset
             exclude_self (bool): drop the diagonal (i, i) self-pairs. Self-pairs are
@@ -236,20 +242,26 @@ class PairShapeDataset(Dataset):
         """
         assert isinstance(dataset, SingleShapeDataset), f'Invalid input data type of dataset: {type(dataset)}'
         self.dataset = dataset
-        self.combinations = [(i, j) for i, j in product(range(len(dataset)), repeat=2)
-                             if not (exclude_self and i == j)]
-
+        self.combinations = self._build_combinations(exclude_self)
         self.flip_up = self.dataset.flip_up
 
-    def __getitem__(self, index):
-        # get index
-        first_index, second_index = self.combinations[index]
+    def _build_combinations(self, exclude_self):
+        """The ordered (i, j) shape-index pairs this dataset enumerates. Default: the full
+        cartesian product, minus the diagonal when exclude_self. Override when the benchmark
+        decides the pair set (DT4D's split rules, SHREC19's shipped .map files)."""
+        return [(i, j) for i, j in product(range(len(self.dataset)), repeat=2)
+                if not (exclude_self and i == j)]
 
-        item = dict()
-        item['first'] = self.dataset[first_index]
-        item['second'] = self.dataset[second_index]
-
+    def _pair_gt(self, item, index):
+        """Hook to rewrite a fetched pair's GT, called before sparsification. Default: none --
+        both shapes already carry a 'corr' into the shared template. Override when the GT is
+        pair-level (SHREC19) or must be composed across categories (DT4D inter-class)."""
         return item
+
+    def __getitem__(self, index):
+        first_index, second_index = self.combinations[index]
+        item = {'first': self.dataset[first_index], 'second': self.dataset[second_index]}
+        return self._pair_gt(item, index)
 
     def __len__(self):
         return len(self.combinations)
@@ -264,7 +276,10 @@ class SparsePairShapeDataset(PairShapeDataset):
     'sparse' sub-dict (same key names as the full dict: feat, dist, verts, plus idx),
     holding n_sparse points chosen by FPS on 'first' (X) and pushed through the shared
     template to 'second' (Y), so the sparse GT is bijective by construction (main
-    note 5). Pair-level fields ('gt_perm', 'fps_idx') sit at the top level. Keeping
+    note 5). "Template" means whatever indexes both shapes' corr: a shared .vts for
+    FAUST/SCAPE/SMAL/DT4D, or X's own vertex set when the GT is a per-pair dense map
+    (SHREC19, corr_x = arange). Pair-level fields ('gt_perm', 'fps_idx') sit at the
+    top level. Keeping
     the per-shape/first-second layout mirrors the denoiser's pair-swap symmetry.
 
     Args:
@@ -284,11 +299,18 @@ class SparsePairShapeDataset(PairShapeDataset):
     .vts, inside the metric) is a valid score. Left False for training and the fast dev
     metric; flipped on solely by evaluate.py so it can never leak into training.
     """
+    # False: both shapes carry a 'corr' into a shared template, loaded by the single-shape
+    # dataset (ret_corr). True: there is no shared template and _pair_gt attaches a per-pair
+    # corr instead (SHREC19), so ret_corr is legitimately off on the single-shape dataset.
+    pair_level_corr = False
+
     def __init__(self, dataset, n_sparse: int = 128, phase: str = "train", exclude_self: bool = False,
                  fps_metric: str = "geodesic"):
         super().__init__(dataset, exclude_self=exclude_self)
-        assert dataset.ret_corr and dataset.ret_dist, \
-            "SparsePairShapeDataset needs corr and dist"
+        assert dataset.ret_corr or self.pair_level_corr, \
+            "SparsePairShapeDataset needs corr: set ret_corr, or attach it per pair " \
+            "(_pair_gt) and set pair_level_corr"
+        assert dataset.ret_dist, "SparsePairShapeDataset needs dist"
         assert fps_metric in ("geodesic", "euclidean"), \
             f"fps_metric must be 'geodesic' or 'euclidean', got {fps_metric!r}"
         self.n_sparse = n_sparse
@@ -373,9 +395,8 @@ class SparsePairShapeDataset(PairShapeDataset):
         return self._sparsify(item, index)
 
     def _sparsify(self, item, index):
-        """Attach the sparse views to a fetched pair. Split out from __getitem__ so
-        subclasses that rewrite the pair's GT first (e.g. DT4D's cross-category corr
-        composition) can fetch, fix corr, then call this."""
+        """Attach the sparse views to a fetched pair whose GT is already final (i.e. after
+        PairShapeDataset._pair_gt)."""
         x, y = item['first'], item['second']
 
         if self.independent_fps:

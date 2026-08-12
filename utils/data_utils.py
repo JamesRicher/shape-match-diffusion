@@ -173,8 +173,9 @@ def consistent_bijective_fps(verts_x: np.ndarray, corr_x: np.ndarray, corr_y: np
                              n: int, start: int, dist_x: np.ndarray = None) -> np.ndarray:
     """Pick n template positions giving a bijective sparse correspondence on both shapes.
 
-    The .vts map template point -> vertex is many-to-one per shape (FAUST: 5000 template
-    points -> ~3.5k distinct vertices), so corr_x[K] and corr_y[K] can collide. FPS on
+    The template point -> vertex map is many-to-one per shape (FAUST's .vts: 5000 template
+    points -> ~3.5k distinct vertices; SHREC19's per-pair .map likewise, with X's own vertex
+    set as the template), so corr_x[K] and corr_y[K] can collide. FPS on
     X's covered points gives a well-spread ordering; :func:`_greedy_bijective` keeps only
     positions distinct on both shapes, so the GT is an exact permutation. FPS depth grows
     until n points are collected (cheap: caps well below the full template for small n).
@@ -190,8 +191,14 @@ def consistent_bijective_fps(verts_x: np.ndarray, corr_x: np.ndarray, corr_y: np
     Returns K (n,) template positions, in FPS order.
     """
     T = corr_x.shape[0]
-    pool = verts_x[corr_x]
-    pool_dist = dist_x[corr_x][:, corr_x] if dist_x is not None else None
+    # corr_x is the identity when the template IS X's own vertex set (a per-pair dense map,
+    # e.g. SHREC19). Skip the gather then: fancy-indexing dist_x would copy the whole (V, V)
+    # geodesic matrix per item for nothing.
+    if T == verts_x.shape[0] and bool((corr_x == np.arange(T)).all()):
+        pool, pool_dist = verts_x, dist_x
+    else:
+        pool = verts_x[corr_x]
+        pool_dist = dist_x[corr_x][:, corr_x] if dist_x is not None else None
     depth = min(T, max(4 * n, 64))
     while True:
         sel = _greedy_bijective(fps(pool, depth, start, dist=pool_dist), corr_x, corr_y, n)
