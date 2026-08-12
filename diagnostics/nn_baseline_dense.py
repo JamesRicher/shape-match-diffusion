@@ -24,9 +24,22 @@ diffusion win over nn alone cannot tell them apart. Unconstrained argmax fails l
 several sparse points collapse onto one target (fine median, huge p90), which linear assignment
 repairs for free -- no shape knowledge required.
 
-All three use independent (honest) FPS -- the regime the reported dense MGE lives in -- the same
-densifier (feat_source and all), and metrics.calculate_geodesic_error exactly as evaluate.py's
-validation() does. So:
+All three are scored on the SAME three numbers evaluate.py reports for the full pipeline:
+
+  * dense MGE            -- honest independent FPS, densified, metrics.calculate_geodesic_error.
+  * sparse independent   -- the same independent-FPS sparse map re-scored AT the sparse points
+                            against real template GT (diagnostics.sparse_independent_error's
+                            nearest-landmark rule). The regime dense MGE lives in, minus the
+                            densifier, so it separates matcher error from lift error.
+  * sparse bijective     -- a SECOND pass with dataset.independent_fps = False, where sparse Y
+                            point j is built to match sparse X point j, giving the identity-GT
+                            acc + avg_error that stats.json calls sparse_acc / sparse_avg_error.
+                            Uses GT in point selection, so it is a dev diagnostic, not an honest
+                            number (it structurally cannot show a symmetry flip). --no-bijective
+                            skips this pass; it costs one extra forward per pair.
+
+The dense arms use the same densifier (feat_source and all) and metrics.calculate_geodesic_error
+exactly as evaluate.py's validation() does. So:
 
   nn ~ hungarian ~ diffusion  -> the denoiser is dead weight for the final map.
   nn >> hungarian ~ diffusion -> the diffusion's apparent win is just bijectivity; a linear
@@ -41,7 +54,7 @@ USAGE
       --checkpoint experiments/diffusionnet/faust_diffusionnet_512_FMD/models/final.pth
 
 Optional: --num-pairs N (0 = all), --no-diffusion (feature arms only, faster), --no-hungarian,
---fps-metric
+--no-bijective (skip the bijective-FPS sparse pass), --fps-metric
 {config,geodesic,euclidean}, --device cuda/cpu, --seed (for the --num-pairs subset).
 """
 import argparse
@@ -61,6 +74,7 @@ from models.base_model import to_numpy
 from evaluate import apply_override
 from train import autofill_feat_dim
 from utils.options import load_yaml, resolve_experiment_paths
+from diagnostics.sparse_independent_error import _sparse_independent_error
 
 calculate_geodesic_error = build_metric({"type": "calculate_geodesic_error"})
 
@@ -218,6 +232,27 @@ def _dense_mge(model, data, sparse_p2p):
         to_numpy(data['second']['corr']), to_numpy(dense_p2p), return_mean=False)
 
 
+def _sparse_gt(data):
+    """Per-pair arguments of the independent-FPS sparse GT rule, hoisted out of the arm loop
+    (they depend only on the pair, not on the matcher). See sparse_independent_error."""
+    x, y = data['first'], data['second']
+    return (to_numpy(x['sparse']['idx']).astype(np.int64),
+            to_numpy(y['sparse']['idx']).astype(np.int64),
+            to_numpy(x['dist']), to_numpy(y['dist']),
+            to_numpy(x['corr']).astype(np.int64),
+            to_numpy(y['corr']).astype(np.int64))
+
+
+def _bijective_sparse(data, sparse_p2p):
+    """(acc, per-point error) under bijective FPS, exactly as the model's validation() computes
+    the reported sparse_acc / sparse_avg_error: sparse Y point j matches sparse X point j, so
+    the GT is the identity diagonal and the error is read off the sparse geodesic submatrix."""
+    D_x = to_numpy(data['first']['sparse']['dist'])                 # (n, n) geodesic on X
+    p2p = to_numpy(sparse_p2p).astype(np.int64)
+    rows = np.arange(len(p2p))
+    return float((p2p == rows).mean()), D_x[rows, p2p]
+
+
 def _summary(err):
     err = np.ravel(err)
     return {'dense_MGE': float(err.mean()),
@@ -226,9 +261,29 @@ def _summary(err):
             'gross_gt_0.1': float(np.mean(err > 0.1))}
 
 
+def _sparse_summary(err):
+    """Independent-FPS sparse error, at the sparse points (the honest sparse number)."""
+    err = np.ravel(err)
+    return {'sparse_MGE': float(err.mean()),
+            'median': float(np.median(err)),
+            'p90': float(np.percentile(err, 90)),
+            'gross_gt_0.1': float(np.mean(err > 0.1))}
+
+
+def _arm_maps(model, data, with_hungarian, with_diffusion):
+    """The sparse Y->X map of every enabled arm for one pair, from a single feature forward."""
+    sim = _feature_similarity(model, data)                          # one forward, both feature arms
+    maps = {'nn': _nn_sparse_map(sim)}
+    if with_hungarian:
+        maps['hungarian'] = _hungarian_sparse_map(sim)
+    if with_diffusion:
+        maps['diffusion'] = model.validate_single(data)
+    return maps
+
+
 @torch.no_grad()
 def run(config_path, checkpoint, device, fps_metric, num_pairs, seed, with_diffusion, with_hungarian,
-        degrade_mode=None, degrade_strength=0.0, overrides=None, tag=None):
+        degrade_mode=None, degrade_strength=0.0, overrides=None, tag=None, with_bijective=True):
     model, dataset, opt, ckpt = _build(config_path, checkpoint, device, fps_metric, overrides=overrides)
     name = opt['name']
     torch.manual_seed(seed)                                          # reproducible noise draws
@@ -239,18 +294,34 @@ def run(config_path, checkpoint, device, fps_metric, num_pairs, seed, with_diffu
         n = min(num_pairs, len(dataset))
         idxs = sorted(np.random.default_rng(seed).choice(len(dataset), size=n, replace=False).tolist())
 
-    errs = {'nn': [], 'hungarian': [], 'diffusion': []}
+    errs = {'nn': [], 'hungarian': [], 'diffusion': []}             # dense, per vertex
+    sp_errs = {'nn': [], 'hungarian': [], 'diffusion': []}          # sparse, independent FPS
     arms = ' vs '.join(['nn'] + ['hungarian'] * with_hungarian + ['diffusion'] * with_diffusion)
-    for i in tqdm(idxs, desc=f'{name} ({arms}, dense MGE)'):
+    for i in tqdm(idxs, desc=f'{name} ({arms}, independent FPS)'):
         data = dataset[i]
-        sim = _feature_similarity(model, data)                      # one forward, both feature arms
-        errs['nn'].append(_dense_mge(model, data, _nn_sparse_map(sim)))
-        if with_hungarian:
-            errs['hungarian'].append(_dense_mge(model, data, _hungarian_sparse_map(sim)))
-        if with_diffusion:
-            errs['diffusion'].append(_dense_mge(model, data, model.validate_single(data)))
+        gt = _sparse_gt(data)                                       # matcher-independent, hoisted
+        for k, p2p in _arm_maps(model, data, with_hungarian, with_diffusion).items():
+            errs[k].append(_dense_mge(model, data, p2p))
+            sp_errs[k].append(_sparse_independent_error(to_numpy(p2p).astype(np.int64), *gt))
+
+    # second pass: the bijective-FPS regime, where the identity GT makes acc defined. Same model
+    # (degradation still installed), same pairs -- only the sparse sampling changes.
+    bij_acc = {k: [] for k in errs}
+    bij_err = {k: [] for k in errs}
+    if with_bijective:
+        dataset.independent_fps = False
+        try:
+            for i in tqdm(idxs, desc=f'{name} ({arms}, bijective FPS sparse)'):
+                data = dataset[i]
+                for k, p2p in _arm_maps(model, data, with_hungarian, with_diffusion).items():
+                    acc, e = _bijective_sparse(data, p2p)
+                    bij_acc[k].append(acc)
+                    bij_err[k].append(e)
+        finally:
+            dataset.independent_fps = True                          # leave the honest regime set
 
     err = {k: np.concatenate(v) for k, v in errs.items() if v}
+    sp_err = {k: np.concatenate(v) for k, v in sp_errs.items() if v}
     summary = {'name': name, 'checkpoint': ckpt, 'n_pairs': len(idxs),
                'fps_metric': getattr(dataset, 'fps_metric', 'config'),
                'feat_source': getattr(model.densifier, 'feat_source', None),
@@ -261,6 +332,15 @@ def run(config_path, checkpoint, device, fps_metric, num_pairs, seed, with_diffu
     for k in ('hungarian', 'diffusion'):
         if k in err:
             summary[k] = _summary(err[k])
+    # sparse stats nest inside each arm, so the pre-existing dense keys stay where they were
+    for k, key in (('nn', 'nn_baseline'), ('hungarian', 'hungarian'), ('diffusion', 'diffusion')):
+        if key not in summary:
+            continue
+        summary[key]['sparse_independent'] = _sparse_summary(sp_err[k])
+        if bij_err[k]:
+            summary[key]['sparse_bijective'] = {
+                'acc': float(np.mean(bij_acc[k])),
+                'avg_error': float(np.concatenate(bij_err[k]).mean())}
     if 'diffusion' in err:
         summary['delta_MGE_nn_minus_diffusion'] = summary['nn_baseline']['dense_MGE'] - summary['diffusion']['dense_MGE']
         if 'hungarian' in err:                                      # the control: is the win just bijectivity?
@@ -275,7 +355,10 @@ def run(config_path, checkpoint, device, fps_metric, num_pairs, seed, with_diffu
     np.savez(os.path.join(out_dir, f'{stem}.npz'),
              nn_error=err['nn'],
              hungarian_error=err.get('hungarian', np.array([])),
-             diffusion_error=err.get('diffusion', np.array([])))
+             diffusion_error=err.get('diffusion', np.array([])),
+             nn_sparse_error=sp_err['nn'],
+             hungarian_sparse_error=sp_err.get('hungarian', np.array([])),
+             diffusion_sparse_error=sp_err.get('diffusion', np.array([])))
     summary['out_dir'] = out_dir
     with open(os.path.join(out_dir, f'{stem}.json'), 'w') as f:
         json.dump(summary, f, indent=2)
@@ -289,14 +372,29 @@ def _print(s):
     if s.get('degradation'):
         d = s['degradation']
         print(f"feature degrade : {d['mode']} @ strength {d['strength']:g}  (all arms, extractor output)")
+    arms = [(k, l) for k, l in (('nn_baseline', 'feature-NN'), ('hungarian', 'feature+Hungarian'),
+                                ('diffusion', 'diffusion')) if k in s]
     print(f"\n{'matcher':>17} {'dense MGE':>11} {'median':>9} {'p90':>9} {'gross>0.1':>11}")
     print('-' * 60)
-    for key, label in (('nn_baseline', 'feature-NN'), ('hungarian', 'feature+Hungarian'),
-                       ('diffusion', 'diffusion')):
-        if key in s:
-            a = s[key]
-            print(f"{label:>17} {a['dense_MGE']:>11.4f} {a['median']:>9.4f} {a['p90']:>9.4f} "
-                  f"{a['gross_gt_0.1']*100:>10.1f}%")
+    for key, label in arms:
+        a = s[key]
+        print(f"{label:>17} {a['dense_MGE']:>11.4f} {a['median']:>9.4f} {a['p90']:>9.4f} "
+              f"{a['gross_gt_0.1']*100:>10.1f}%")
+
+    # sparse stats: the same maps scored before the densifier lift
+    print(f"\n{'matcher':>17} {'sparse MGE':>11} {'median':>9} {'p90':>9} {'gross>0.1':>11}"
+          f" | {'bij acc':>8} {'bij err':>9}")
+    print('-' * 82)
+    for key, label in arms:
+        a = s[key].get('sparse_independent')
+        if a is None:
+            continue
+        b = s[key].get('sparse_bijective')
+        bij = (f" | {b['acc']:>8.3f} {b['avg_error']:>9.4f}" if b else f" | {'--':>8} {'--':>9}")
+        print(f"{label:>17} {a['sparse_MGE']:>11.4f} {a['median']:>9.4f} {a['p90']:>9.4f} "
+              f"{a['gross_gt_0.1']*100:>10.1f}%{bij}")
+    print("(sparse MGE = independent FPS, real GT, at the sparse points -- honest. bij acc/err = "
+          "bijective\n FPS, identity GT -- dev diagnostic; it cannot show a symmetry flip.)")
     if 'diffusion' in s:
         print('-' * 60)
         print(f"delta (NN - diffusion)        = {s['delta_MGE_nn_minus_diffusion']:+.4f}")
@@ -316,6 +414,8 @@ def main():
     p.add_argument('--seed', type=int, default=0, help='seed for the --num-pairs subset')
     p.add_argument('--no-diffusion', action='store_true', help='feature arms only (skip the diffusion pass)')
     p.add_argument('--no-hungarian', action='store_true', help='skip the linear-assignment control arm')
+    p.add_argument('--no-bijective', action='store_true',
+                   help='skip the bijective-FPS sparse pass (sparse acc); saves one forward per pair')
     p.add_argument('--fps-metric', choices=('config', 'geodesic', 'euclidean'), default='config',
                    help='override the dataset FPS metric (default: whatever the config says)')
     p.add_argument('--device', default=None, help="'cuda' / 'cpu'; auto-detected when omitted")
@@ -344,7 +444,8 @@ def main():
 
     s = run(args.config, args.checkpoint, args.device, args.fps_metric,
             args.num_pairs, args.seed, not args.no_diffusion, not args.no_hungarian,
-            degrade_mode, degrade_strength, args.overrides, args.tag)
+            degrade_mode, degrade_strength, args.overrides, args.tag,
+            with_bijective=not args.no_bijective)
     _print(s)
     print(f"\nper-pair errors + JSON under: {s['out_dir']}/")
 
