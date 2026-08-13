@@ -1,0 +1,26 @@
+{
+  "name": "smal_mpnn_512_FMD_xyz_snrfd_tw_gt_indep_bp",
+  "eval_tag": "Smal_r",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/mpnn_diffusion/smal_mpnn_512_FMD_xyz_snrfd_tw_gt_indep_bp/models/final.pth",
+  "dataset": {
+    "name": "Smal_r",
+    "type": "SparsePairSmalDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "category": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "euclidean"
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.08751855045557022,
+  "auc": 0.5576199394986527,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.1369755119085312,
+  "sparse_acc": 0.38015522203947366,
+  "sparse_auc": 0.5527651099813928,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}
