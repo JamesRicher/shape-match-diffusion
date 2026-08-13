@@ -25,10 +25,15 @@ class ShapeCache:
     The light entries (feats/verts/faces/corres) stay unbounded; they're small.
 
     Args:
-        dist_maxsize: max distinct geodesic matrices kept (LRU). None => unbounded.
-        ops_maxsize: max distinct spectral-operator sets kept (LRU). None => unbounded.
+        dist_maxsize: max distinct geodesic matrices kept (LRU). None => unbounded. The bound
+            is per WORKER, so the real footprint is dist_maxsize × matrix × num_workers: at 16
+            that was ~33 GB on DT4D (256 MB float32 matrices, 8 workers) for little return —
+            training shuffles pairs over ~100 shapes, so the hit rate is maxsize/#shapes either
+            way, and a miss only costs the ~20 ms .mat read.
+        ops_maxsize: max distinct spectral-operator sets kept (LRU). None => unbounded. Left
+            larger: an operator set is ~12 MB, two orders of magnitude below a distance matrix.
     """
-    def __init__(self, dist_maxsize: Optional[int] = 16, ops_maxsize: Optional[int] = 16):
+    def __init__(self, dist_maxsize: Optional[int] = 4, ops_maxsize: Optional[int] = 16):
         self._feats: dict = {}
         self._corres: dict = {}
         self._verts: dict = {}

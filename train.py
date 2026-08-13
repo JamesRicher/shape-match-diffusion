@@ -282,7 +282,10 @@ def build_dataloaders(opt, num_workers):
     common = dict(collate_fn=_single_collate, num_workers=num_workers,
                   worker_init_fn=_seed_worker, multiprocessing_context=mp_ctx,
                   persistent_workers=num_workers > 0,
-                  prefetch_factor=(4 if num_workers > 0 else None))
+                  # queue memory is prefetch x workers x item, and an item carries the full
+                  # V*V geodesic matrix (~218 MB/pair on FAUST, ~549 MB on DT4D): at 4 that is
+                  # ~18 GB in flight on DT4D with 8 workers. 2 still hides the per-shape load.
+                  prefetch_factor=(2 if num_workers > 0 else None))
     train_loader = DataLoader(train_set, batch_size=1, shuffle=True, **common)
     val_loader = DataLoader(val_set, batch_size=1, shuffle=False, **common)
     return train_set, _RestoringLoader(train_loader), _RestoringLoader(val_loader)

@@ -53,8 +53,15 @@ def load_off(off_file: str) -> Tuple[np.ndarray, np.ndarray]:
 
 
 def load_dist(dist_file: str) -> np.ndarray:
+    """Geodesic distance matrix, as float32.
+
+    The .mat stores float64, which is 200 MB per FAUST shape (520 MB on DT4D) — doubling both
+    the per-worker LRU footprint and every item's copy, for precision no downstream consumer
+    keeps: the dataset converts to float32 tensors anyway. Casting here makes that conversion a
+    no-op view instead of a full copy.
+    """
     assert os.path.isfile(dist_file), f"Invalid .mat file: {dist_file}"
-    return scipy.io.loadmat(dist_file)["dist"]
+    return scipy.io.loadmat(dist_file)["dist"].astype(np.float32, copy=False)
 
 
 # GEOMETRY HELPERS
@@ -199,7 +206,12 @@ def consistent_bijective_fps(verts_x: np.ndarray, corr_x: np.ndarray, corr_y: np
     else:
         pool = verts_x[corr_x]
         pool_dist = dist_x[corr_x][:, corr_x] if dist_x is not None else None
-    depth = min(T, max(4 * n, 64))
+    # Greedy farthest-point sampling is NESTED: the first d entries of the ordering are the same
+    # whatever depth it was computed to. So depth only decides how many candidates the bijective
+    # filter gets to reject before the loop below doubles and retries — the returned points are
+    # identical either way. 2n is enough at every dataset's usual rejection rate; 4n roughly
+    # doubled the cost of what is the single most expensive step in building a training item.
+    depth = min(T, max(2 * n, 64))
     while True:
         sel = _greedy_bijective(fps(pool, depth, start, dist=pool_dist), corr_x, corr_y, n)
         if len(sel) == n:
