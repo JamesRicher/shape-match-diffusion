@@ -185,15 +185,20 @@ def move_to_device(obj, device):
     return obj
 
 
-def _maybe_subset(dataset, n):
-    """Deterministic evenly-spaced subset of `n` items, for cheap mid-training validation.
-    Returns the dataset unchanged if `n` is falsy or >= its length. Full test evaluation
-    (evaluate.py) is unaffected — it builds the test set directly."""
+def _maybe_subset(dataset, n, seed=0):
+    """Deterministic RANDOM subset of `n` items, for cheap mid-training validation.
+
+    Random rather than evenly spaced: pair lists are ordered by construction (source shape,
+    then category), so a fixed stride correlates with that ordering. On DT4D inter it put 10
+    of 20 val pairs in a single category pair (crypto->drake) and missed 5 of the 12 entirely,
+    which is why the val curve tracked the test set so poorly. The seed is fixed, not derived
+    from the run, so epoch-to-epoch and run-to-run numbers stay comparable — the property the
+    stride was there for. Returns the dataset unchanged if `n` is falsy or >= its length. Full
+    test evaluation (evaluate.py) is unaffected — it builds the test set directly."""
     if not n or n >= len(dataset):
         return dataset
-    stride = max(1, len(dataset) // n)
-    indices = list(range(0, len(dataset), stride))[:n]
-    return Subset(dataset, indices)
+    indices = np.random.default_rng(seed).choice(len(dataset), n, replace=False)
+    return Subset(dataset, sorted(indices.tolist()))
 
 
 def _set_independent_train_prob(dataset, prob):
