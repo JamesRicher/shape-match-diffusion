@@ -53,13 +53,21 @@ networks:
       tau: 1.0              # 1 = sum-product
       alpha: 0.5            # damping (fixed, not learned)
       slack: -4.0           # abstention score for unproposed matches
-      n_sweeps: 3           # train-time inference effort; override at eval
+      at_block: 1           # BP runs ONCE per forward (= per DDIM step), at this block
+                            #   of the depth-6 trunk. The old per-block stack had already
+                            #   collapsed itself: on effective writes the top block carried
+                            #   48-97% and was 0 or 1 in 7/8 runs. Blocks after it still
+                            #   consume the write, which putting BP last would forfeit.
+      n_sweeps: 8           # train-time inference effort; override at eval. Raised 3 -> 8:
+                            #   one call at 8 sweeps is still ~1/2 the BP cost of six at 3.
       beta_init: 0.5        # unary scale at init; beta(t) learned from the spine
+      beta_min: 0.1         # bounds on beta -- BOTH ends of its range destroy the mixing
+      beta_max: 4.0         #   of evidence, and the old softplus reached 0.000 and 9.6
       g_scale: 4.0          # fixed multiplier on the zero-init output gate
-      bidirectional: true   # 1/2(D_Y + D_X^T) -> exact pair-swap symmetry
-      cycle_gate: true      # per-vertex round-trip agreement gate (d=1)
-      track_decay: 1.0      # rho on the u_bp accumulator; 1 = full exclusion
-      checkpoint: true      # recompute BP sweeps in backward (activation memory)
+      bidirectional: true   # 1/2(D_Y + D_X^T) -> exact pair-swap symmetry, no gate needed
+      cycle_gate: false     # OFF: learned v was ~0 in 44/48 blocks, so the round-trip
+                            #   signal was never used -- the gate's bias was an off-switch
+      checkpoint: false     # one call, not six: ~6x less activation memory to trade away
 
 diffusion:
   eta: 0.0

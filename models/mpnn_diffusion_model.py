@@ -455,6 +455,16 @@ class MPNNDiffusionModel(BaseModel):
             msg.append(f"dense auc={result['auc']:.4f}")
         logger.info("Dev: " + " | ".join(msg))
 
+        # BP's own state, from the last pair sampled. beta/g are what the gates learned;
+        # msg_delta is the max message change on the final sweep, i.e. whether n_sweeps
+        # is set anywhere near right (large => BP has not converged and more sweeps is
+        # the knob; ~0 => the trailing sweeps are idle). Endpoint-only profiling is what
+        # let the previous gate collapse go unnoticed for a whole run series.
+        bp = getattr(getattr(self.networks['denoiser'], 'bp', None), 'stats', None)
+        if bp:
+            result.update(bp)
+            logger.info("BP: " + " ".join(f"{k.split('/')[-1]}={v:+.4f}" for k, v in bp.items()))
+
         if first_data is not None and self.diag_loss_vs_t:
             curve = self.loss_vs_t(first_data, self.diag_bins, self.diag_repeats)
             vals = list(curve.values())

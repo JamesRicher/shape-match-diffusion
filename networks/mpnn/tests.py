@@ -182,18 +182,44 @@ def test_bp_disabled_by_default():
 
 
 def test_bp_gates_at_init():
-    """g = 0 and the agreement gate w = 1 exactly at init (identity + calibrated g)."""
+    """g = 0, beta = beta_init, and (when enabled) w = 1 exactly at init."""
     net = _build("mpnn", bp=BP_CFG)
     c = torch.randn(4, 32)
-    blk = net.bp.blocks[0]
+    blk = net.bp.block
     with torch.no_grad():
         g = blk.g_scale * blk.g_head(c)
-        w = blk._gate(torch.rand(4, 16), c)
-        beta = torch.nn.functional.softplus(blk.beta_head(c))
+        beta = blk._beta(c)
     ok = _report("[bp] output gate g = 0 at init", g.abs().max().item())
-    ok &= _report("[bp] agreement gate w = 1 at init", (w - 1).abs().max().item())
     ok &= _report("[bp] beta = beta_init, constant in t", (beta - 0.5).abs().max().item())
-    return ok
+
+    gated = _build("mpnn", bp={**BP_CFG, "cycle_gate": True}).bp.block
+    with torch.no_grad():
+        w = gated._gate(torch.rand(4, 16), c)
+    return ok and _report("[bp] agreement gate w = 1 at init", (w - 1).abs().max().item())
+
+
+def test_bp_beta_bounds():
+    """beta stays inside (beta_min, beta_max) for any head output, and cannot saturate
+    to a dead gradient at either end (notes: the softplus version reached 0.000 and 9.6).
+    """
+    blk = _build("mpnn", bp={**BP_CFG, "beta_min": 0.1, "beta_max": 4.0}).bp.block
+    with torch.no_grad():                       # drive the head hard in both directions
+        blk.beta_head[-1].bias.fill_(-50.0)
+        lo = blk._beta(torch.randn(8, 32))
+        blk.beta_head[-1].bias.fill_(50.0)
+        hi = blk._beta(torch.randn(8, 32))
+    inside = bool((lo >= 0.1).all() and (hi <= 4.0).all())
+    print(f"[{'PASS' if inside else 'FAIL'}] [bp] beta bounded"
+          f"{'':<34} min={lo.min():.4f} max={hi.max():.4f}")
+
+    blk.beta_head[-1].bias.data.fill_(3.0)      # well up the sigmoid, not at init
+    beta = blk._beta(torch.randn(4, 32))
+    beta.sum().backward()
+    grad = blk.beta_head[-1].bias.grad.abs().max().item()
+    live = grad > 0.0
+    print(f"[{'PASS' if live else 'FAIL'}] [bp] beta gradient alive off-centre"
+          f"{'':<20} |grad|={grad:.2e}")
+    return inside and live
 
 
 def test_bp_writes_when_gated_on():
@@ -203,8 +229,7 @@ def test_bp_writes_when_gated_on():
     fx, fy, Dx, Dy, P_t, t = _make_inputs(2, 16, 8)
     with torch.no_grad():
         base = net(P_t, fx, fy, Dx, Dy, t)
-        for blk in net.bp.blocks:
-            blk.g_head[-1].bias.fill_(0.5)
+        net.bp.block.g_head[-1].bias.fill_(0.5)
         moved = net(P_t, fx, fy, Dx, Dy, t)
     d = (moved - base).abs().max().item()
     ok = d > 1e-4 and torch.isfinite(moved).all()
@@ -213,17 +238,18 @@ def test_bp_writes_when_gated_on():
     return ok
 
 
-def test_bp_residual_unary_tracking():
-    """u_bp accumulates exactly what BP wrote, so u - u_bp excludes BP's own history.
+def test_bp_runs_once_at_configured_block():
+    """BP fires exactly once per forward, at `at_block` and nowhere else.
 
-    Drives the stack by hand for two blocks and checks the accumulator against the
-    writes it returned (notes/bp_implementation_and_exclusion.md §4.2).
+    Drives the stage by hand over every block index: exactly one must move u, and it
+    must be the configured one. This is the invariant the whole rewrite rests on — six
+    calls per forward was what the trained gates had already collapsed to ~one.
     """
     torch.manual_seed(7)
-    net = _build("mpnn", bp=BP_CFG)
+    depth, at = 3, 1
+    net = _build("mpnn", depth=depth, bp={**BP_CFG, "at_block": at})
     with torch.no_grad():
-        for blk in net.bp.blocks:
-            blk.g_head[-1].bias.fill_(0.5)
+        net.bp.block.g_head[-1].bias.fill_(0.5)
     fx, fy, Dx, Dy, P_t, t = _make_inputs(2, 16, 8)
     idx_x, _ = net._geo(Dx)
     idx_y, _ = net._geo(Dy)
@@ -231,22 +257,27 @@ def test_bp_residual_unary_tracking():
     with torch.no_grad():
         c = net.spine(t)
         u = safe_log(P_t)
-        st = net.bp.init_state(u, fx, fy, geo_x, geo_y)
-        ok = _report("[bp] u_bp starts at zero", st["u_bp"].abs().max().item())
-        writes = torch.zeros_like(u)
-        for i in (0, 1):
-            u_new, st = net.bp(i, u, st, fx, fy, geo_x, geo_y, c)
-            writes = writes + (u_new - u)
-            u = u_new + 0.1 * torch.randn_like(u)   # stand in for other blocks' writes
-    return ok and _report("[bp] u_bp == sum of BP's own writes",
-                          (st["u_bp"] - writes).abs().max().item(), tol=1e-5)
+        cache = net.bp.init_cache(fx, fy, geo_x, geo_y)
+        fired = [(net.bp(i, u, cache, fx, fy, geo_x, geo_y, c) - u).abs().max().item()
+                 for i in range(depth)]
+    ok = fired[at] > 1e-4 and all(v == 0.0 for i, v in enumerate(fired) if i != at)
+    print(f"[{'PASS' if ok else 'FAIL'}] [bp] runs once, at at_block={at}"
+          f"{'':<20} writes={['%.1e' % v for v in fired]}")
+
+    bad = False
+    try:
+        _build("mpnn", depth=depth, bp={**BP_CFG, "at_block": depth})
+    except ValueError:
+        bad = True
+    print(f"[{'PASS' if bad else 'FAIL'}] [bp] at_block out of range rejected")
+    return ok and bad
 
 
 def test_bp_sweep_count_override():
     """Test-time inference effort must be settable without touching weights."""
     net = _build("mpnn", bp=BP_CFG)
     net.bp.set_n_sweeps(9)
-    ok = all(b.n_sweeps == 9 for b in net.bp.blocks)
+    ok = net.bp.block.n_sweeps == 9
     fx, fy, Dx, Dy, P_t, t = _make_inputs(1, 16, 8)
     with torch.no_grad():
         finite = torch.isfinite(net(P_t, fx, fy, Dx, Dy, t)).all().item()
@@ -267,7 +298,7 @@ def test_bp_checkpoint_equivalence():
         out = net(P_t, fx, fy, Dx, Dy, t)
         out.sum().backward()
         outs.append(out.detach())
-        grads.append(net.bp.blocks[0].g_head[-1].weight.grad.clone())
+        grads.append(net.bp.block.g_head[-1].weight.grad.clone())
     ok = _report("[bp] checkpoint: same forward", (outs[0] - outs[1]).abs().max().item())
     return ok and _report("[bp] checkpoint: same gradients",
                           (grads[0] - grads[1]).abs().max().item(), tol=1e-5)
@@ -291,8 +322,9 @@ if __name__ == "__main__":
     print("\n=== belief propagation ===")
     results += [t() for t in (test_bp_disabled_by_default,
                               test_bp_gates_at_init,
+                              test_bp_beta_bounds,
                               test_bp_writes_when_gated_on,
-                              test_bp_residual_unary_tracking,
+                              test_bp_runs_once_at_configured_block,
                               test_bp_sweep_count_override,
                               test_bp_checkpoint_equivalence)]
     print(f"\n{sum(results)}/{len(results)} property groups passed")

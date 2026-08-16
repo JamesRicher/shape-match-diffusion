@@ -14,7 +14,8 @@ Per call (stateless across diffusion steps — only P_t carries the trajectory):
         intra(X), intra(Y)      geodesic MPNN, shared instance      (intra_mpnn)
         cross(X<->Y)            'attn' or 'mpnn' by config          (cross_stage)
         u <- StateWrite(...)    feature/affinity write              (state_track)
-        u <- u + g(c)*Δ_bp      optional belief propagation         (bp_block)
+        u <- u + g(c)*Δ_bp      belief propagation, ONCE per forward at
+                                block bp.at_block                   (bp_block)
         u <- soft_project_sym   cheap re-gauge, transpose-symmetric
         rewarp(X), rewarp(Y)    refreshed belief back into tokens
 
@@ -34,7 +35,7 @@ from networks.mpnn.geometry import (RBFEmbed, feature_knn, knn_from_dist,
                                     normalise_knn_dist)
 from networks.mpnn.intra_mpnn import IntraMPNNLayer
 from networks.mpnn.cross_stage import build_cross_stage
-from networks.mpnn.bp_block import BPStack
+from networks.mpnn.bp_block import BPStage
 from networks.mpnn.state_track import (InputEmbed, Rewarp, StateWrite,
                                        soft_project_sym)
 
@@ -58,8 +59,9 @@ class MPNNMatrixDenoiser(nn.Module):
         inner_iters: soft-Sinkhorn iterations per in-block re-gauge.
         mlp_ratio, dropout: FFN settings.
         time_scale: t scaling into the sinusoidal spine.
-        bp: belief-propagation settings (networks/mpnn/bp_block.BPStack) or None to
-            disable entirely — no parameters, no code path (the default).
+        bp: belief-propagation settings (networks/mpnn/bp_block.BPStage) or None to
+            disable entirely — no parameters, no code path (the default). BP runs once
+            per forward, at block `bp.at_block`.
     """
 
     def __init__(self, feat_dim: int, dim: int, depth: int = 5, heads: int = 4,
@@ -88,10 +90,9 @@ class MPNNMatrixDenoiser(nn.Module):
 
         # BP subsystem (notes/BP-loop-design.md). It owns its own gated additive write
         # rather than feeding StateWrite's reserved pair-MLP channel: routing it through
-        # the pair-MLP would mix BP's contribution into du nonlinearly, so its stream
-        # could not be tracked and the block-level exclusion (residual unaries u - u_bp)
-        # would be unimplementable. That channel stays fed with zeros.
-        self.bp = BPStack(depth, dim, **bp) if bp else None
+        # the pair-MLP would mix BP's contribution into du nonlinearly and destroy the
+        # calibrated meaning of beta and g. That channel stays fed with zeros.
+        self.bp = BPStage(depth, dim, **bp) if bp else None
 
     def _geo(self, D: torch.Tensor):
         """Static per-call intra-graph tensors: kNN indices + RBF-embedded distances."""
@@ -119,7 +120,7 @@ class MPNNMatrixDenoiser(nn.Module):
         hy = self.embed(F_y, P, F_x)                     # rows of P: Y pulls back X
         hx = self.embed(F_x, P.transpose(-1, -2), F_y)
         geo_x, geo_y = (idx_x, D_x), (idx_y, D_y)
-        bp_state = self.bp.init_state(u, F_x, F_y, geo_x, geo_y) if self.bp else None
+        bp_cache = self.bp.init_cache(F_x, F_y, geo_x, geo_y) if self.bp else None
 
         # ---- blocks ---- #
         for i, (intra, cross, write) in enumerate(zip(self.intra, self.cross, self.write)):
@@ -129,7 +130,7 @@ class MPNNMatrixDenoiser(nn.Module):
 
             u = write(hx, hy, u, c)
             if self.bp is not None:                      # BP sees the freshest state,
-                u, bp_state = self.bp(i, u, bp_state, F_x, F_y, geo_x, geo_y, c)
+                u = self.bp(i, u, bp_cache, F_x, F_y, geo_x, geo_y, c)   # no-op off at_block
             u = soft_project_sym(u, n_iters=self.inner_iters)   # ...and is re-gauged
 
             if i < len(self.rewarp):                     # refreshed belief bridge

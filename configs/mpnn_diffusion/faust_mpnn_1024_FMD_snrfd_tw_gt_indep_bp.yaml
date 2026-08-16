@@ -68,13 +68,15 @@ networks:
       tau: 1.0              # 1 = sum-product
       alpha: 0.5            # damping (fixed, not learned)
       slack: -4.0           # abstention score for unproposed matches
-      n_sweeps: 5           # 3*sqrt(2): restores propagation distance at 2x density
+      at_block: 1           # BP runs ONCE per forward (= per DDIM step), at this trunk block
+      n_sweeps: 8           # train-time inference effort; override at eval
       beta_init: 0.5        # unary scale at init; beta(t) learned from the spine
+      beta_min: 0.1         # bounds on beta -- both ends of its range destroy the mixing
+      beta_max: 4.0         #   of evidence, and the old softplus reached 0.000 and 9.6
       g_scale: 4.0          # fixed multiplier on the zero-init output gate
       bidirectional: true   # 1/2(D_Y + D_X^T) -> exact pair-swap symmetry
-      cycle_gate: true      # per-vertex round-trip agreement gate (d=1)
-      track_decay: 1.0      # rho on the u_bp accumulator; 1 = full exclusion
-      checkpoint: true      # recompute BP sweeps in backward (activation memory)
+      cycle_gate: false     # OFF: learned v was ~0, so the gate acted only as an off-switch
+      checkpoint: false     # one call, not six: ~6x less activation memory to trade away
 
 diffusion:
   eta: 0.0               # inert under the gaussian target (see _target); pinned for parity

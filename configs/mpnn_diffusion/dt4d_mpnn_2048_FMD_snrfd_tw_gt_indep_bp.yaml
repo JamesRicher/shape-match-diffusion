@@ -1,30 +1,36 @@
-# dt4d_mpnn_1024_FMD_snrfd_tw_gt_indep_bp: the n_sparse=512 recipe at DOUBLE sparse resolution. Adds in-loop belief propagation
-# (notes/BP-loop-design.md); the no-BP twin of this file is the matched control. BP's output gate
-# is zero-init, so training starts as the parent architecture and BP fades in.
+# dt4d_mpnn_2048_FMD_snrfd_tw_gt_indep_bp: the DT4D BP recipe at 4x the 512 sparse resolution.
+# Third point on the resolution axis (512 -> 1024 -> 2048), BP held fixed, so the comparison
+# against dt4d_mpnn_1024_FMD_snrfd_tw_gt_indep_bp isolates n_sparse.
 #
-# WHY. Under independent FPS a query's GT image does not coincide with any source anchor; that
-# coincidence gap (~0.45 x anchor spacing) is the irreducible floor on sparse error, and at 512 it
-# is already ~3x LARGER than the sparse error BP achieves -- so accuracy is being poured into a
-# container too coarse to hold it. Spacing goes as n^-1/2, so 1024 cuts the gap ~30%
-# (FAUST 0.0190 -> 0.0126 sqrt-area units).
+# WHY. The coincidence gap -- distance from a query's GT image to the nearest source anchor
+# under independent FPS -- is the irreducible floor on sparse error, and it falls as n^-1/2.
+# At 512 it is ~3x LARGER than the sparse error BP already achieves, so BP's accuracy is being
+# quantised away by the anchor set. 2048 cuts the gap ~2x versus 512.
 #
-# COUPLED KNOBS -- n_sparse alone is NOT a valid change. Everything defined relative to anchor
-# spacing must move with it:
-#   target.sigma  0.030 -> 0.021   keeps ~4 anchors inside the kernel AND holds the GT-survival
-#                                  work band at t~0.55 (diagnostics/gt_survival_sweep.py). Leaving
-#                                  sigma at 0.030 collapses it to t~0.32 and puts the t_sampler
-#                                  bands in the region where the GT is already destroyed.
-#   target.cutoff 0.090 -> 0.063   3*sigma, as before
-#   target.floor  2e-4  -> 1e-4    holds the tail budget floor*n = 0.1
-#   k_intra       12    -> 16      12*sqrt(2): same geodesic radius per hop at 2x density
+# COUPLED KNOBS (spacing ~ n^-1/2, so everything defined relative to spacing moves with it):
+#   target.sigma  0.030 -> 0.015   0.03 * sqrt(512/2048). VERIFIED, not extrapolated: DT4D's own
+#                                  GT-survival band is t@50% = 0.55 at (512, sigma 0.030), and
+#                                  0.51 at (2048, sigma 0.015) -- inside the sweep's grid
+#                                  resolution. sigma 0.0165 gave 0.45, clearly too low.
+#                                  (diagnostics/gt_survival_sweep.py)
+#   target.cutoff 0.090 -> 0.045   3*sigma, as before
+#   target.floor  2e-4  -> 5e-5    holds the tail budget floor*n_sparse = 0.1
+#   k_intra       12    -> 24      12*sqrt(4): same geodesic radius per hop at 4x density
+#   bp.n_sweeps   3     -> 6       3*sqrt(4): restores BP's propagation distance
 #   logsnr_shift  0.0   -> 0.0     UNCHANGED: the sigma rescale alone realigns the schedule
 #
-# Matched to the 512 run in epochs, LRs, schedulers and extractor init, so resolution (plus the
-# knobs it forces) is the only variable.
+# RISK -- READ BEFORE TRUSTING A NEGATIVE RESULT. The bijective sparse GT caps at ~3166 points
+# for INTER pairs (the cross-category composition stacks a second many-to-one map on the .vts),
+# so n_sparse=2048 is ~65% of cap, past the ~50% where the constraint starts to bite: the
+# bijective FPS spread ratio falls to ~0.90, i.e. anchors are measurably more clustered than
+# free FPS would place them, and biased AWAY from the detail regions the filter rejects. Intra
+# is comfortable (~40% of its ~5173 cap). If this run underperforms 1024, that bias is the first
+# suspect, not resolution -- check by rerunning with the inter pool alone at 1024 vs 2048.
 #
-# NOTE (DT4D): the inter-class cross-map composition halves the bijective cap to ~3166, so 1024 is
-# ~32% of cap -- comfortable. The intra cap is ~5173.
-name: dt4d_mpnn_1024_FMD_snrfd_tw_gt_indep_bp
+# COST. State is n^2, so ~4x the 1024 run per step and ~16x the 512 run. Validation densifies
+# every pair under independent FPS; subset is kept at 60 for comparability with the 1024 runs,
+# but this is the first knob to cut if val dominates the epoch.
+name: dt4d_mpnn_2048_FMD_snrfd_tw_gt_indep_bp
 group: mpnn_diffusion               # experiments/<group>/<name>/
 model_type: MPNNDiffusionModel
 is_train: true
@@ -36,12 +42,12 @@ path:
 datasets:
   # combined pools (ULRSSM): intra with exclude_self; inter has no diagonal by construction
   train:
-    - {name: Dt4d_r, type: SparsePairDT4DDataset, phase: train, inter_class: false, n_sparse: 1024, exclude_self: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
-    - {name: Dt4d_r, type: SparsePairDT4DDataset, phase: train, inter_class: true,  n_sparse: 1024, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+    - {name: Dt4d_r, type: SparsePairDT4DDataset, phase: train, inter_class: false, n_sparse: 2048, exclude_self: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+    - {name: Dt4d_r, type: SparsePairDT4DDataset, phase: train, inter_class: true,  n_sparse: 2048, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
   val:   # BOTH regimes, mirroring train: inter-only val ignored half the training distribution
-    - {name: Dt4d_r, type: SparsePairDT4DDataset, phase: test, inter_class: false, n_sparse: 1024, exclude_self: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
-    - {name: Dt4d_r, type: SparsePairDT4DDataset, phase: test, inter_class: true,  n_sparse: 1024, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
-  test:  {name: Dt4d_r, type: SparsePairDT4DDataset, phase: test, inter_class: true, n_sparse: 1024, ret_evecs: true, num_evecs: 200, fps_metric: euclidean}
+    - {name: Dt4d_r, type: SparsePairDT4DDataset, phase: test, inter_class: false, n_sparse: 2048, exclude_self: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+    - {name: Dt4d_r, type: SparsePairDT4DDataset, phase: test, inter_class: true,  n_sparse: 2048, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  test:  {name: Dt4d_r, type: SparsePairDT4DDataset, phase: test, inter_class: true, n_sparse: 2048, ret_evecs: true, num_evecs: 200, fps_metric: euclidean}
 
 networks:
   extractor:
@@ -59,7 +65,7 @@ networks:
     depth: 6
     heads: 4              # cross-attention heads (used only when cross_type=attn)
     cross_type: mpnn      # candidate-graph GNN cross stage (feature-kNN ∪ state top-k)
-    k_intra: 16           # 12*sqrt(2) at 2x density: same geodesic radius per hop
+    k_intra: 24           # 12*sqrt(4) at 4x density: same geodesic radius per hop
     k_feat: 10            # static feature-kNN candidates per receiver (cross)
     k_state: 10           # dynamic state-top-k candidates per receiver (cross)
     n_rbf: 16             # RBF basis size (distance + state-value filters)
@@ -98,9 +104,9 @@ diffusion:
     uniform_frac: 0.1
   target:
     type: gaussian       # REQUIRED for independent-FPS training (asserted in _target)
-    sigma: 0.021         # 0.03 * sqrt(512/1024); holds the survival band (gt_survival_sweep)
-    cutoff: 0.063        # 3*sigma
-    floor: 1.0e-4        # holds the tail budget floor*n_sparse = 0.1
+    sigma: 0.015         # 0.03 * sqrt(512/2048); holds the survival band (gt_survival_sweep)
+    cutoff: 0.045        # 3*sigma
+    floor: 5.0e-5        # holds the tail budget floor*n_sparse = 0.1
   sample_steps: 50
   final_iters: 20
 
@@ -119,7 +125,6 @@ eval:
   dense: false
 
 train:
-  # combined pool = 8702 pairs/epoch; 22 epochs ~ FAUST's 30 x ~6300 total-step budget
   total_epochs: 22
   log_freq: 20
   independent_train_prob: 1.0   # (A) full honest independent-FPS training; 0 = bijective (default)
