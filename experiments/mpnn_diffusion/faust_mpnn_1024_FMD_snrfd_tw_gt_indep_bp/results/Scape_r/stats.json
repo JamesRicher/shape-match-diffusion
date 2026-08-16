@@ -1,0 +1,25 @@
+{
+  "name": "faust_mpnn_1024_FMD_snrfd_tw_gt_indep_bp",
+  "eval_tag": "Scape_r",
+  "checkpoint": "experiments/mpnn_diffusion/faust_mpnn_1024_FMD_snrfd_tw_gt_indep_bp/models/final.pth",
+  "dataset": {
+    "name": "Scape_r",
+    "type": "SparsePairScapeDataset",
+    "phase": "test",
+    "n_sparse": 1024,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "euclidean"
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.05449523776769638,
+  "auc": 0.689435124933546,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.08487547188997269,
+  "sparse_acc": 0.3408203125,
+  "sparse_auc": 0.6499722632368089,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}

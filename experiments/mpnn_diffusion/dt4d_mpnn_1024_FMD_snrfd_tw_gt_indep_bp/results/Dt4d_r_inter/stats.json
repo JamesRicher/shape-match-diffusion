@@ -1,0 +1,25 @@
+{
+  "name": "dt4d_mpnn_1024_FMD_snrfd_tw_gt_indep_bp",
+  "eval_tag": "Dt4d_r_inter",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/mpnn_diffusion/dt4d_mpnn_1024_FMD_snrfd_tw_gt_indep_bp/models/final.pth",
+  "dataset": {
+    "name": "Dt4d_r",
+    "type": "SparsePairDT4DDataset",
+    "phase": "test",
+    "inter_class": true,
+    "n_sparse": 1024,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "euclidean"
+  },
+  "num_test_pairs": 1200,
+  "dense_error": 0.03544380143284798,
+  "auc": 0.7443778558244344,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.030526556074619293,
+  "sparse_acc": 0.4827400716145833,
+  "sparse_auc": 0.7897642234519676,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}
