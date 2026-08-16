@@ -107,7 +107,14 @@ class BaseModel:
     # training step
     # ------------------------------------------------------------------ #
     def optimize_parameters(self):
-        """Sum the loss terms, back-prop and step every optimizer."""
+        """Sum the loss terms, back-prop and step every optimizer.
+
+        Two non-finite guards make a single bad step survivable instead of terminal.
+        clip_grad_norm_ CANNOT rescue a nan/inf gradient -- it divides by the (then
+        non-finite) total norm, so the coefficient is 0 or nan and the poisoned grads
+        pass straight through into optimizer.step(), corrupting every weight for the rest
+        of the run. So instead of relying on the clip, we detect the non-finite state and
+        skip the step entirely (grads are cleared by the next iteration's zero_grad)."""
         loss = 0.0
         for k, v in self.loss_metrics.items():
             if k != 'l_total':
@@ -116,9 +123,32 @@ class BaseModel:
 
         for name in self.optimizers:
             self.optimizers[name].zero_grad()
+
+        # Guard 1: a non-finite loss must never reach backward -- its grads would be
+        # non-finite too and there is nothing to clip that back to sanity.
+        if not torch.isfinite(loss):
+            self.skipped_steps = getattr(self, 'skipped_steps', 0) + 1
+            get_root_logger().warning(
+                f'Non-finite loss ({loss.item()}); skipping step '
+                f'(total skipped: {self.skipped_steps}).')
+            return
+
         loss.backward()
+
+        # Guard 2: a finite loss can still backprop to a non-finite gradient through the
+        # unrolled Sinkhorn/BP/MPNN graph. clip_grad_norm_ returns the PRE-clip norm, so
+        # we get the finiteness check for free while still clipping the healthy case.
+        finite = True
         for key in self.networks:
-            torch.nn.utils.clip_grad_norm_(self.networks[key].parameters(), 1.0)
+            gn = torch.nn.utils.clip_grad_norm_(self.networks[key].parameters(), 1.0)
+            finite = finite and bool(torch.isfinite(gn))
+        if not finite:
+            self.skipped_steps = getattr(self, 'skipped_steps', 0) + 1
+            get_root_logger().warning(
+                f'Non-finite gradient norm; skipping step '
+                f'(total skipped: {self.skipped_steps}).')
+            return
+
         for name in self.optimizers:
             self.optimizers[name].step()
 

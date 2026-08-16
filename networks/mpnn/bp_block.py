@@ -82,8 +82,11 @@ class BPBlock(nn.Module):
         n_sweeps: sweeps per call (mutable at eval — see BPStage.set_n_sweeps).
         beta_init: unary scale at init; must lie strictly inside (beta_min, beta_max).
         beta_min, beta_max: the bounds of the learned unary scale (see module docstring).
-        g_scale: fixed multiplier on the output gate, so the learned head works in
-            O(1) units against a post-process optimum of g ~ 4-16.
+        g_scale: initial slope of the output gate (dg/d(head) at init), so the learned
+            head works in O(1) units against a post-process optimum of g ~ 4-16.
+        g_max: smooth bound on the output gate, |g| < g_max via g = g_max·tanh(raw/g_max)
+            (see `forward`). Default 20 leaves the 4-16 band in the near-linear region and
+            caps only the runaway tail; the gate stays differentiable everywhere.
         bidirectional: run the X pass too and combine ½(Δ_Y + Δ_Xᵀ). Required for
             pair-swap symmetry.
         cycle_gate: enable the per-vertex round-trip agreement gate w. OFF by default:
@@ -106,7 +109,7 @@ class BPBlock(nn.Module):
                  sigma: float = 0.05, delta: float = 4.0, tau: float = 1.0,
                  alpha: float = 0.5, slack: float = -4.0, n_sweeps: int = 8,
                  beta_init: float = 0.5, beta_min: float = 0.1, beta_max: float = 4.0,
-                 g_scale: float = 4.0, bidirectional: bool = True,
+                 g_scale: float = 4.0, g_max: float = 20.0, bidirectional: bool = True,
                  cycle_gate: bool = False, checkpoint: bool = False):
         super().__init__()
         if cycle_gate and not bidirectional:
@@ -120,7 +123,7 @@ class BPBlock(nn.Module):
         self.alpha, self.slack = alpha, slack
         self.n_sweeps = n_sweeps
         self.beta_min, self.beta_max = beta_min, beta_max
-        self.g_scale = g_scale
+        self.g_scale, self.g_max = g_scale, g_max
         self.bidirectional, self.cycle_gate = bidirectional, cycle_gate
         self.checkpoint = checkpoint
 
@@ -248,7 +251,16 @@ class BPBlock(nn.Module):
                 d_x = self._gate(a_x, c).unsqueeze(-1) * d_x     # -> scales columns
             delta = 0.5 * (d_y + d_x.transpose(-1, -2))
 
-        g = self.g_scale * self.g_head(c).unsqueeze(-1)          # (B,1,1)
+        # Output gate, smoothly bounded to (-g_max, g_max). The write feeds u before the
+        # Sinkhorn read-in, so an unbounded g (zero-init but free to grow) was a runaway
+        # path into log_sinkhorn -> nan. tanh keeps a live gradient at every value (a hard
+        # clamp would zero it past the bound and freeze g there), and the g_scale/g_max
+        # framing preserves the old behaviour where it matters: at init g_head=0 -> g=0
+        # (exact identity), and the initial slope dg/d(head) is still g_scale, so the O(1)
+        # head units and the calibrated 4-16 operating band are unchanged in the near-
+        # linear region -- g_max only caps the tail.
+        raw = self.g_scale * self.g_head(c).unsqueeze(-1)        # (B,1,1)
+        g = self.g_max * torch.tanh(raw / self.g_max)
         return g * delta, {"beta": beta.mean(), "g": g.mean(), "msg_delta": md.mean()}
 
 
