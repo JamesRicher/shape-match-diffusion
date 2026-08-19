@@ -1,0 +1,30 @@
+{
+  "name": "smal_mpnn_512_FMD_xyz_snrfd_tw_gt_indep_bp1_s0",
+  "eval_tag": "Smal_r",
+  "checkpoint": "experiments/mpnn_diffusion/smal_mpnn_512_FMD_xyz_snrfd_tw_gt_indep_bp1_s0/models/final.pth",
+  "dataset": {
+    "name": "Smal_r",
+    "type": "SparsePairSmalDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "category": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "euclidean"
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.07792359590530396,
+  "auc": 0.5664975669184571,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "bp/write_abs": 0.00020821255748160183,
+  "bp/beta": 2.461491346359253,
+  "bp/g": 0.004675619304180145,
+  "bp/msg_delta": 0.013845488429069519,
+  "sparse_avg_error": 0.09321880340576172,
+  "sparse_acc": 0.41887849506578945,
+  "sparse_auc": 0.61036407454479,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}

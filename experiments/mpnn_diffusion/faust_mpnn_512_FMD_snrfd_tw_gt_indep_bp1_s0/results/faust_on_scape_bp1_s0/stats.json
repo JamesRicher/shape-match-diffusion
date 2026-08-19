@@ -1,0 +1,29 @@
+{
+  "name": "faust_mpnn_512_FMD_snrfd_tw_gt_indep_bp1_s0",
+  "eval_tag": "faust_on_scape_bp1_s0",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/mpnn_diffusion/faust_mpnn_512_FMD_snrfd_tw_gt_indep_bp1_s0/models/final.pth",
+  "dataset": {
+    "name": "Scape_r",
+    "type": "SparsePairScapeDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "euclidean"
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.055719293653964996,
+  "auc": 0.6751697713981923,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "bp/write_abs": 0.0004437562311068177,
+  "bp/beta": 3.093569755554199,
+  "bp/g": 0.0860808864235878,
+  "bp/msg_delta": 0.012032080441713333,
+  "sparse_avg_error": 0.08210424333810806,
+  "sparse_acc": 0.48800884046052634,
+  "sparse_auc": 0.6718392290503722,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}
