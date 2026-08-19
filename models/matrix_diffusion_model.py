@@ -72,6 +72,12 @@ class MatrixDiffusionModel(BaseModel):
         self.target_sigma = tg.get('sigma', 0.03)       # kernel width, sqrt-area units (~anchor spacing)
         self.target_cutoff = tg.get('cutoff', 3.0 * self.target_sigma)
         self.target_floor = tg.get('floor', 2e-4)       # tail mass past the cutoff (~eta/m's budget)
+        # doubly_stochastic (default False = row-stochastic, unchanged): Sinkhorn-normalise the
+        # gaussian target into the balanced entropic-OT coupling (sigma = OT temperature), so it
+        # lives in the same Birkhoff polytope as the read-in Pi_S. See
+        # notes/2026-08-17_entropic_ot_doubly_stochastic_target.md.
+        self.target_ds = tg.get('doubly_stochastic', False)
+        self.target_ds_iters = tg.get('ds_iters', 20)
         ts = cfg.get('t_sampler')
         self.t_sampler = None if ts is None else {
             't_min_drop': ts.get('t_min_drop', 0.35),   # band floor for feature-dropped steps
@@ -167,9 +173,12 @@ class MatrixDiffusionModel(BaseModel):
         if self.target_type == 'gaussian':
             if D_cross is not None:
                 T = gaussian_target_from_dist(D_cross, self.target_sigma, self.target_cutoff,
-                                              self.target_floor)
+                                              self.target_floor, doubly_stochastic=self.target_ds,
+                                              ds_iters=self.target_ds_iters)
             else:
-                T = gaussian_target(P0, D_x, self.target_sigma, self.target_cutoff, self.target_floor)
+                T = gaussian_target(P0, D_x, self.target_sigma, self.target_cutoff,
+                                    self.target_floor, doubly_stochastic=self.target_ds,
+                                    ds_iters=self.target_ds_iters)
             logT = safe_log(T)
             return T, logT, -(T * logT).sum(-1).mean()
         assert D_cross is None, "independent-FPS training requires the gaussian target"

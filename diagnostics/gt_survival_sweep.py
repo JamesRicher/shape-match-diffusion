@@ -86,7 +86,9 @@ def _curves(dataset, idxs, shifts, tgrid, draws, eta, s, proj, device, gen, targ
             sigma = target.get('sigma', 0.03)
             u0 = safe_log(gaussian_target(P0, D_x, sigma,
                                           target.get('cutoff', 3.0 * sigma),
-                                          target.get('floor', 2e-4)))
+                                          target.get('floor', 2e-4),
+                                          doubly_stochastic=target.get('doubly_stochastic', False),
+                                          ds_iters=target.get('ds_iters', 20)))
         else:
             u0 = logit_target(P0, eta)
         for bi, b in enumerate(shifts):

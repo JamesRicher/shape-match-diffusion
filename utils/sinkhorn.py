@@ -113,6 +113,26 @@ def logit_target(P0: torch.Tensor, eta: float = 0.1, eps: float = 1e-8) -> torch
     return safe_log(P_tilde, eps)
 
 
+def _normalise_kernel(
+    K: torch.Tensor,
+    doubly_stochastic: bool = False,
+    ds_iters: int = 20,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """Normalise an affinity kernel K into a soft-assignment target.
+
+    doubly_stochastic False (default): row-normalise -> row-stochastic, each query a
+    distribution over anchors (the original behaviour). True: Sinkhorn -> doubly-stochastic,
+    the balanced entropic-OT coupling with uniform marginals (sigma is the OT temperature).
+    The DS target then lives in the same Birkhoff polytope as the read-in Pi_S, so the target
+    is no longer outside the read-in's image. Sinkhorn ends on a column pass so rows sum to
+    ~1 (to tolerance), leaving row-CE against the target unchanged.
+    """
+    if not doubly_stochastic:
+        return K / K.sum(-1, keepdim=True).clamp_min(eps)
+    return log_sinkhorn(safe_log(K, eps), n_iters=ds_iters).exp()
+
+
 def gaussian_target(
     P0: torch.Tensor,
     D_x: torch.Tensor,
@@ -120,6 +140,8 @@ def gaussian_target(
     cutoff: Optional[float] = None,
     floor: float = 2e-4,
     eps: float = 1e-8,
+    doubly_stochastic: bool = False,
+    ds_iters: int = 20,
 ) -> torch.Tensor:
     """Geodesic soft assignment target: row j ∝ exp(-d(g(j), ·)² / 2σ²), floored past cutoff.
 
@@ -137,14 +159,16 @@ def gaussian_target(
         floor: tail value (relative to the unit peak) past the cutoff — the uniform
             label-smoothing mass, playing eta/m's role in logit_target. Total tail mass
             is ~floor*C, so 2e-4 at C=512 matches eta=0.1's smoothing budget.
-    Returns T (..., R, C) row-stochastic soft target (safe_log(T) embeds it as logits).
+        doubly_stochastic: Sinkhorn-normalise into a doubly-stochastic (entropic-OT) target
+            instead of row-stochastic; see :func:`_normalise_kernel`. Default False (unchanged).
+        ds_iters: Sinkhorn iterations when doubly_stochastic.
+    Returns T (..., R, C) soft target (row-stochastic by default; safe_log(T) embeds it as logits).
     """
     if cutoff is None:
         cutoff = 3.0 * sigma
     K = torch.exp(-D_x.pow(2) / (2.0 * sigma ** 2))
     K = torch.where(D_x > cutoff, K.new_tensor(floor), K)
-    T = P0 @ K
-    return T / T.sum(-1, keepdim=True).clamp_min(eps)
+    return _normalise_kernel(P0 @ K, doubly_stochastic, ds_iters, eps)
 
 
 def gaussian_target_from_dist(
@@ -153,6 +177,8 @@ def gaussian_target_from_dist(
     cutoff: Optional[float] = None,
     floor: float = 2e-4,
     eps: float = 1e-8,
+    doubly_stochastic: bool = False,
+    ds_iters: int = 20,
 ) -> torch.Tensor:
     """Geodesic soft target for INDEPENDENT (non-corresponding) sparse points: row j ∝
     exp(-D_cross[j,·]² / 2σ²), floored past cutoff.
@@ -166,13 +192,14 @@ def gaussian_target_from_dist(
     Args:
         D_cross: (..., R, C) query-image -> source-anchor geodesic distances (sqrt-area units).
         sigma, cutoff, floor: as in gaussian_target.
-    Returns T (..., R, C) row-stochastic soft target.
+        doubly_stochastic, ds_iters: as in gaussian_target (default False = row-stochastic).
+    Returns T (..., R, C) soft target (row-stochastic by default; doubly-stochastic if requested).
     """
     if cutoff is None:
         cutoff = 3.0 * sigma
     K = torch.exp(-D_cross.pow(2) / (2.0 * sigma ** 2))
     K = torch.where(D_cross > cutoff, K.new_tensor(floor), K)
-    return K / K.sum(-1, keepdim=True).clamp_min(eps)
+    return _normalise_kernel(K, doubly_stochastic, ds_iters, eps)
 
 
 def cosine_alpha_bar(t: torch.Tensor, s: float = 0.008, logsnr_shift: float = 0.0) -> torch.Tensor:
