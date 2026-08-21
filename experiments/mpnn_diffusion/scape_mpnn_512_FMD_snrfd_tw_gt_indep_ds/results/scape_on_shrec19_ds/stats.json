@@ -1,0 +1,25 @@
+{
+  "name": "scape_mpnn_512_FMD_snrfd_tw_gt_indep_ds",
+  "eval_tag": "scape_on_shrec19_ds",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/mpnn_diffusion/scape_mpnn_512_FMD_snrfd_tw_gt_indep_ds/models/final.pth",
+  "dataset": {
+    "name": "Shrec19_r",
+    "type": "SparsePairShrec19Dataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "euclidean"
+  },
+  "num_test_pairs": 407,
+  "dense_error": 0.04444631189107895,
+  "auc": 0.6331221584725089,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.04861784353852272,
+  "sparse_acc": 0.47041519502457,
+  "sparse_auc": 0.6880792773015783,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}
