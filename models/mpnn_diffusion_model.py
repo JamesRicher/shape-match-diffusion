@@ -1,20 +1,4 @@
 """MPNN diffusion matcher: the MPNN-denoiser twin of MatrixDiffusionModel.
-
-A verbatim copy of models/matrix_diffusion_model.py at its 2026-08-05 state, kept
-separate so the transformer path can keep running untouched while this one grows
-MPNN-specific machinery (BP diagnostics, auxiliary losses on intermediate block
-states). Pair it with networks/mpnn's MPNNMatrixDenoiser via
-opt['networks']['denoiser']['type']; the denoiser contract is identical.
-
-Original docstring:
-
-Wraps a denoiser under opt['networks']['denoiser']. Training noises the clean logit
-target u0 = logit_target(P0*) with the VP forward marginal q_sample, projects to a
-doubly-stochastic read-in P_t = Π_S(u_t), predicts the clean logits u0_hat, and takes
-assignment-space row-CE on the projected prediction. Inference runs a DDIM (predict-x0)
-reverse process in logit space, then Hungarian-snaps the final DS matrix to a sparse
-point-to-point map. Densification to the full mesh is deferred (steps.md Step 3): dev
-evaluation is the sparse geodesic error over the FPS points.
 """
 import os
 from collections import OrderedDict
@@ -47,17 +31,14 @@ class MPNNDiffusionModel(BaseModel):
         self.logsnr_shift = cfg.get('logsnr_shift', 0.0) # uniform log-SNR shift (nats); 0 = plain cosine
         self.sample_steps = cfg.get('sample_steps', 50) # reverse steps at inference
         self.final_iters = cfg.get('final_iters', 20)   # Sinkhorn iters for the final DS snap
-        # zero the per-point features so the ONLY cross-shape signal is P_t (the alpha*log P_t
-        # skip + geodesic pull-backs). Turns the single-pair overfit into a genuine test of the
-        # P_t pathway: with features present the bilinear readout solves the match from features
-        # alone and loss_vs_t is flat at every t (see overfit-gate-feature-shortcut memory).
+        # projected-reverse sampling (inference only): after each DDIM update, re-embed the
+        # iterate as the log of its Sinkhorn projection so the carried score itself stays
+        # (approximately) on the polytope, not just the read-in. Default False = the standard
+        # loop where the score is carried raw and only the read-in P_t is projected. Weights
+        # are unaffected (sampler-only knob), so it can be toggled on an existing checkpoint.
+        self.reproject = cfg.get('reproject', False)
         self.ablate_features = cfg.get('ablate_features', False)
         # CFG-style conditioning dropout (Ho & Salimans 2022): each TRAIN step, with this
-        # probability, zero the whole feature block so the denoiser must denoise from P_t +
-        # geodesics alone. Forces a feature-free mode -> the P_t pathway becomes self-sufficient
-        # (so the reschedule's work-band gets used, not bypassed by the feature one-shot) and, if
-        # wanted later, enables classifier-free guidance at sampling. Eval/diagnostics (is_train
-        # False after eval()) never drop. See reverse-trajectory-inert / loss-vs-t memories.
         self.feature_dropout = cfg.get('feature_dropout', 0.0)
         # train-time t sampler (diagnostics/loss_vs_t_draws.py): under uniform t most steps
         # draw a near-zero loss -- with features present the loss is ~0 at EVERY t, and even
@@ -67,23 +48,12 @@ class MPNNDiffusionModel(BaseModel):
         # P_t already contains the answer). `uniform_frac` of steps keep t ~ U[0,1] so the
         # near-clean regime the reverse sampler visits at inference never atrophies.
         # None (default) = plain t ~ U[0,1].
-        # training target (diffusion.target). 'onehot' (default) = the original behaviour:
-        # eta-smoothed logit embedding, row-CE against the HARD permutation (zero loss floor).
-        # 'gaussian' = geodesic soft target (utils.sinkhorn.gaussian_target): mass falls off
-        # with geodesic distance from the GT match on X, floored past the cutoff. Used for
-        # BOTH the clean logits u0 and the CE weights (the denoiser's fixed point and its
-        # supervision must agree); the target's entropy is subtracted from the loss so the
-        # logged value is the KL, with the same zero floor / gradients as before.
         tg = cfg.get('target', {})
         self.target_type = tg.get('type', 'onehot')
         assert self.target_type in ('onehot', 'gaussian'), f'unknown target {self.target_type}'
         self.target_sigma = tg.get('sigma', 0.03)       # kernel width, sqrt-area units (~anchor spacing)
         self.target_cutoff = tg.get('cutoff', 3.0 * self.target_sigma)
         self.target_floor = tg.get('floor', 2e-4)       # tail mass past the cutoff (~eta/m's budget)
-        # doubly_stochastic (default False = row-stochastic, unchanged): Sinkhorn-normalise the
-        # gaussian target into the balanced entropic-OT coupling (sigma = OT temperature), so it
-        # lives in the same Birkhoff polytope as the read-in Pi_S. See
-        # notes/2026-08-17_entropic_ot_doubly_stochastic_target.md.
         self.target_ds = tg.get('doubly_stochastic', False)
         self.target_ds_iters = tg.get('ds_iters', 20)
         ts = cfg.get('t_sampler')
@@ -223,25 +193,6 @@ class MPNNDiffusionModel(BaseModel):
     @torch.no_grad()
     def sample(self, F_x, F_y, D_x, D_y, steps=None, return_trajectory=False, sample_eta=0.0):
         """DDIM (predict-x0) reverse process in logit space. Returns P0 (B, n_y, n_x) DS.
-
-        sample_eta: generalized-DDIM stochasticity (Song et al. 2020, eq. 12). 0.0 = deterministic
-        DDIM (default, unchanged behaviour); 1.0 = full DDPM ancestral sampling. Values >0 inject
-        per-step noise so independent draws diverge into different modes -- the knob for the
-        sample-diversity / best-of-K experiments. NOTE it pushes the reverse-trajectory P_t off
-        the deterministic training distribution, so large values are increasingly off-manifold.
-        Distinct from self.eta (the logit-target label smoothing).
-
-        The read-in projection uses tau=1 (proj_iters) to match training exactly -- the
-        denoiser only ever saw temperate P_t, so annealing the read-in would be
-        off-distribution. Sharpening toward a permutation comes from the reverse
-        trajectory (u_t -> the sharp clean logits u0) and the final Hungarian snap, not
-        from the projection temperature.
-
-        return_trajectory: when True, also return (per-step running hard maps, per-step
-        t values) for the sample-variety diagnostic (vis/sample_variety.py). Each map is
-        a cheap row-argmax snap of the running predict-x0 estimate u0_hat, shape (B, n_y).
-        The default (False) return is just the DS P0, so `sample(...)[0]` callers are
-        unaffected; only pass True when you want the trajectory.
         """
         steps = steps or self.sample_steps
         net = self.networks['denoiser']
@@ -254,6 +205,8 @@ class MPNNDiffusionModel(BaseModel):
             t_i, t_prev = ts[i], ts[i + 1]
             P_t = log_sinkhorn(u, n_iters=self.proj_iters).exp()   # tau=1, as in training
             u0_hat = net(P_t, F_x, F_y, D_x, D_y, t_i.reshape(1).expand(B))
+            if self.reproject:                                    
+                u0_hat = log_sinkhorn(u0_hat, n_iters=self.proj_iters)
             if return_trajectory:                                  # cheap running snap
                 traj.append(self._row_logprob(u0_hat).argmax(-1))  # (B, n_y): current match
 
@@ -267,6 +220,8 @@ class MPNNDiffusionModel(BaseModel):
             u = ab_p.sqrt() * u0_hat + ((1.0 - ab_p) - sigma ** 2).clamp_min(0.0).sqrt() * eps_hat
             if sample_eta > 0.0:
                 u = u + sigma * torch.randn_like(u)
+            if self.reproject:                                     # re-embed onto the polytope
+                u = log_sinkhorn(u, n_iters=self.proj_iters)       # = log(Pi_S(u)), no exp/log round-trip
 
         P0 = log_sinkhorn(u, n_iters=self.final_iters).exp()       # converged DS for Hungarian
         if return_trajectory:
