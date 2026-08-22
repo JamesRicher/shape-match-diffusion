@@ -29,7 +29,7 @@ import torch
 import torch.nn as nn
 
 from utils.registry import NETWORK_REGISTRY
-from utils.sinkhorn import safe_log
+from utils.sinkhorn import safe_log, row_logprob, col_logprob
 from networks.denoiser_conditioning import ConditioningSpine
 from networks.mpnn.geometry import (RBFEmbed, feature_knn, knn_from_dist,
                                     normalise_knn_dist)
@@ -68,12 +68,17 @@ class MPNNMatrixDenoiser(nn.Module):
                  cross_type: str = "attn", k_intra: int = 12, k_feat: int = 10,
                  k_state: int = 10, n_rbf: int = 16, rbf_max: float = 3.0,
                  inner_iters: int = 3, mlp_ratio: float = 4.0, dropout: float = 0.0,
-                 time_scale: float = 1000.0, bp: dict | None = None):
+                 time_scale: float = 1000.0, bp: dict | None = None,
+                 row_stochastic: bool = False):
         super().__init__()
         self.cross_type = cross_type
         self.k_intra = k_intra
         self.k_feat = k_feat
         self.inner_iters = inner_iters
+        # Row-stochastic (non doubly-stochastic) variant. Stored so the owning model can read it
+        # as the single source of truth; the in-trunk re-gauge and X-side warps switch on it in
+        # forward (added in a follow-up). Default False keeps the doubly-stochastic path.
+        self.row_stochastic = row_stochastic
 
         self.spine = ConditioningSpine(dim, time_scale=time_scale)
         self.embed = InputEmbed(feat_dim, dim)
@@ -93,11 +98,33 @@ class MPNNMatrixDenoiser(nn.Module):
         # the pair-MLP would mix BP's contribution into du nonlinearly and destroy the
         # calibrated meaning of beta and g. That channel stays fed with zeros.
         self.bp = BPStage(depth, dim, **bp) if bp else None
+        if self.row_stochastic and self.bp is not None:
+            raise ValueError("BP is not supported with row_stochastic yet (its bidirectional / "
+                             "cycle-gate machinery assumes a doubly-stochastic / bijective map)")
 
     def _geo(self, D: torch.Tensor):
         """Static per-call intra-graph tensors: kNN indices + RBF-embedded distances."""
         idx, dist = knn_from_dist(D, min(self.k_intra, D.shape[-1] - 1))
         return idx, self.dist_rbf(normalise_knn_dist(dist))
+
+    def _regauge(self, u: torch.Tensor) -> torch.Tensor:
+        """Re-gauge the state after a write. Row-stochastic: one row log-softmax, so each row is
+        a log-distribution (the maintained invariant Z_j = 1). DS: the transpose-symmetric
+        truncated Sinkhorn (pair-swap symmetric)."""
+        if self.row_stochastic:
+            return row_logprob(u)
+        return soft_project_sym(u, n_iters=self.inner_iters)
+
+    def _warps(self, u: torch.Tensor):
+        """The two warp matrices read off the current state, (P_y, P_x): P_y (B, n_y, n_x) rows=Y
+        for the Y-token warp; P_x (B, n_x, n_y) rows=X for the X-token warp -- both row-summing
+        to 1 so warp_stats sees genuine distributions. Row-stochastic: P_y = row_softmax(u),
+        P_x = col_softmax(u)^T (the induced X->Y posterior; valid because u is row-normalised).
+        DS: both are views of the single (near) doubly-stochastic P = u.exp()."""
+        if self.row_stochastic:
+            return row_logprob(u).exp(), col_logprob(u).exp().transpose(-1, -2)
+        P = u.exp()
+        return P, P.transpose(-1, -2)
 
     def forward(self, P_t: torch.Tensor, F_x: torch.Tensor, F_y: torch.Tensor,
                 D_x: torch.Tensor, D_y: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
@@ -116,9 +143,12 @@ class MPNNMatrixDenoiser(nn.Module):
 
         # ---- state + tokens ---- #
         u = safe_log(P_t)                                # gauge-fixed read-in
-        P = P_t
-        hy = self.embed(F_y, P, F_x)                     # rows of P: Y pulls back X
-        hx = self.embed(F_x, P.transpose(-1, -2), F_y)
+        # Y warps through rows of P_t; X warps through P_x -- P_t^T under DS, the induced X->Y
+        # posterior col_softmax(u)^T under row-stochastic (columns of P_t are not distributions).
+        P_y = P_t
+        P_x = self._warps(u)[1] if self.row_stochastic else P_t.transpose(-1, -2)
+        hy = self.embed(F_y, P_y, F_x)                   # rows of P: Y pulls back X
+        hx = self.embed(F_x, P_x, F_y)
         geo_x, geo_y = (idx_x, D_x), (idx_y, D_y)
         bp_cache = self.bp.init_cache(F_x, F_y, geo_x, geo_y) if self.bp else None
 
@@ -131,11 +161,11 @@ class MPNNMatrixDenoiser(nn.Module):
             u = write(hx, hy, u, c)
             if self.bp is not None:                      # BP sees the freshest state,
                 u = self.bp(i, u, bp_cache, F_x, F_y, geo_x, geo_y, c)   # no-op off at_block
-            u = soft_project_sym(u, n_iters=self.inner_iters)   # ...and is re-gauged
+            u = self._regauge(u)                         # ...and is re-gauged (row / DS)
 
             if i < len(self.rewarp):                     # refreshed belief bridge
-                P = u.exp()
-                hy = self.rewarp[i](hy, P, F_x)
-                hx = self.rewarp[i](hx, P.transpose(-1, -2), F_y)
+                P_y, P_x = self._warps(u)
+                hy = self.rewarp[i](hy, P_y, F_x)
+                hx = self.rewarp[i](hx, P_x, F_y)
 
         return u

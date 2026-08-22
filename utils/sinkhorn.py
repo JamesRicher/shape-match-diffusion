@@ -59,6 +59,28 @@ def log_sinkhorn(
     return log_p
 
 
+def row_logprob(u: torch.Tensor) -> torch.Tensor:
+    """Row-stochastic read of a logit matrix: log-softmax over the last axis.
+
+    The single-pass, one-sided analogue of log_sinkhorn for the row-stochastic (non
+    doubly-stochastic) variant: each row j becomes log P(x | y_j), a proper distribution
+    over columns, with no column constraint. Take .exp() for the assignment P.
+    """
+    return u - torch.logsumexp(u, dim=-1, keepdim=True)
+
+
+def col_logprob(u: torch.Tensor) -> torch.Tensor:
+    """Column-stochastic read of a logit matrix: log-softmax over the row axis.
+
+    The X-side companion to row_logprob for the row-stochastic variant. When u is already
+    row-normalised (the maintained invariant, so each row's partition Z_j = 1), col_logprob(u)
+    is exactly the uniform-prior Bayesian inversion of P = row_logprob(u).exp(): its exp,
+    read as Q[i, j] = P(y_j | x_i) down each column, equals col_normalise(P). This is the
+    induced X-over-Y posterior the X tokens warp through -- a transient view of u, never stored.
+    """
+    return u - torch.logsumexp(u, dim=-2, keepdim=True)
+
+
 def sample_gumbel(shape, device=None, dtype=torch.float32, generator=None) -> torch.Tensor:
     """i.i.d. standard Gumbel noise -log(-log(U)), U ~ Uniform(0, 1)."""
     u = torch.rand(shape, device=device, dtype=dtype, generator=generator)
@@ -330,6 +352,31 @@ def _run_tests() -> None:
     Pn = sample_doubly_stochastic(n, n, tau=1.0, n_iters=30, batch_shape=(B,))
     ds_err = max((Pn.sum(-1) - 1).abs().max().item(), (Pn.sum(-2) - 1).abs().max().item())
     check("sample_doubly_stochastic is DS", ds_err < 1e-4, f"marg_err={ds_err:.1e}")
+
+    # --- row/col logprob: proper distributions along their axis ------------ #
+    u = torch.randn(B, n, n)
+    Pr = row_logprob(u).exp()
+    Pc = col_logprob(u).exp()
+    r_err = (Pr.sum(-1) - 1).abs().max().item()          # rows -> 1
+    c_err = (Pc.sum(-2) - 1).abs().max().item()          # cols -> 1
+    check("row_logprob/col_logprob normalise their axis", max(r_err, c_err) < 1e-5,
+          f"row_err={r_err:.1e} col_err={c_err:.1e}")
+
+    # --- invariant: on a ROW-normalised u, col_softmax == col-normalise(P) -- #
+    # (what makes the cheap X-side col read equal the uniform-prior inversion of P)
+    ur = row_logprob(u)                                  # enforce the maintained invariant Z_j = 1
+    P = ur.exp()
+    Q_via_col = col_logprob(ur).exp()                    # col-softmax of the row-normalised logits
+    Q_via_norm = P / P.sum(-2, keepdim=True)             # explicit column-normalise of P
+    inv_err = (Q_via_col - Q_via_norm).abs().max().item()
+    check("col_logprob(row-normalised u) == col-normalise(P)", inv_err < 1e-5,
+          f"max_diff={inv_err:.1e}")
+
+    # --- row/col logprob gradients flow ------------------------------------ #
+    x = torch.randn(B, n, n, requires_grad=True)
+    (row_logprob(x).exp().sum() + col_logprob(x).exp().sum()).backward()
+    rc_grad = x.grad is not None and torch.isfinite(x.grad).all() and x.grad.abs().sum() > 0
+    check("row/col logprob gradients flow", bool(rc_grad))
 
     # --- logit_target: row-stochastic, log finite, recovers the permutation - #
     perm2 = torch.stack([torch.randperm(n) for _ in range(B)])
