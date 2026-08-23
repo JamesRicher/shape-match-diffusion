@@ -1,0 +1,94 @@
+# scape_mpnn_512_FMD_snrfd_tw_gt_indep_rs: ROW-stochastic (non doubly-stochastic) variant.
+# Derived from scape_mpnn_512_FMD_snrfd_tw_gt_indep_ds.yaml with the DS coupling removed:
+#   * networks.denoiser.row_stochastic: true  -> one-sided row-softmax read-in / re-gauge /
+#     readout; the X tokens warp through the induced X->Y posterior col_softmax(u)^T. Pair-swap
+#     symmetry is dropped by design.
+#   * diffusion.target.doubly_stochastic: false -> row-stochastic (per-query) target, required.
+#   * diffusion.decode: argmax -> per-row (non-bijective) decode, the natural row-stochastic snap.
+name: scape_mpnn_512_FMD_snrfd_tw_gt_indep_rs
+group: mpnn_diffusion               # experiments/<group>/<name>/
+model_type: MPNNDiffusionModel
+is_train: true
+
+path:
+  resume_state: extractor_experiments/diffusion_net/scape_diffusionnet_hks/models/best.pth
+  resume: false
+
+datasets:
+  train: {name: Scape_r, type: SparsePairScapeDataset, phase: train, n_sparse: 512, exclude_self: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  val:   {name: Scape_r, type: SparsePairScapeDataset, phase: test,  n_sparse: 512, exclude_self: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  test:  {name: Scape_r, type: SparsePairScapeDataset, phase: test,  n_sparse: 512, exclude_self: true, ret_evecs: true, num_evecs: 200, fps_metric: euclidean}
+
+networks:
+  extractor:
+    type: DiffusionNetExtractor
+    out_dim: 128
+    input_type: hks
+    hidden: 128
+    n_block: 4
+    k_eig: 128
+    hks_count: 16
+  denoiser:
+    type: MPNNMatrixDenoiser
+    feat_dim: 128
+    dim: 128
+    depth: 6
+    heads: 4              # cross-attention heads (used only when cross_type=attn)
+    cross_type: mpnn      # candidate-graph GNN cross stage (feature-kNN ∪ state top-k)
+    k_intra: 12           # geodesic-kNN degree for the intra message-passing graph
+    k_feat: 10            # static feature-kNN candidates per receiver (cross)
+    k_state: 10           # dynamic state-top-k candidates per receiver (cross)
+    n_rbf: 16             # RBF basis size (distance + state-value filters)
+    rbf_max: 3.0          # upper end of the normalised-distance RBF grid
+    inner_iters: 3        # DS-only re-gauge iters; a no-op under row_stochastic
+    dropout: 0.0
+    row_stochastic: true  # row-softmax re-gauge + induced X->Y posterior warp (no DS/Sinkhorn)
+    # no bp: block -> BP disabled (BP is unsupported with row_stochastic)
+
+diffusion:
+  eta: 0.0
+  proj_iters: 6          # DS-only; a no-op under row_stochastic
+  schedule_s: 0.008
+  logsnr_shift: 0.0
+  feature_dropout: 0.0   # OFF for this variant
+  decode: argmax         # per-row (non-bijective) decode
+  t_sampler:
+    t_min_drop: 0.35
+    t_min_feat: 0.35
+    uniform_frac: 0.15
+  target:
+    type: gaussian       # REQUIRED for independent-FPS training (asserted in _target)
+    sigma: 0.03
+    cutoff: 0.09
+    floor: 2.0e-4
+    doubly_stochastic: false  # row-stochastic (per-query) target, required by row_stochastic
+  sample_steps: 50
+  final_iters: 20        # DS-only; a no-op under row_stochastic
+
+densifier:
+  type: FunctionalMapDensifier
+  feat_source: diffnet
+  k_fm: 120
+  n_e: 100
+  lm_bands: 20
+  lm_weight: 5.0
+  mu: 0.1
+  variance: 7.0
+
+eval:
+  sparse: true
+  dense: false
+
+train:
+  total_epochs: 40
+  log_freq: 20
+  independent_train_prob: 1.0   # (A) full honest independent-FPS training; 0 = bijective (default)
+  optims:
+    extractor: {type: AdamW, lr: 1e-4, weight_decay: 1e-4}
+    denoiser:  {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+  schedulers:
+    extractor: {type: CosineAnnealingLR, eta_min: 1e-5}
+    denoiser:  {type: CosineAnnealingLR, eta_min: 1e-4}
+
+val:
+  subset: 40

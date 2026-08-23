@@ -12,7 +12,7 @@ from tqdm import tqdm
 from utils.registry import MODEL_REGISTRY
 from utils.logger import get_root_logger
 from utils.sinkhorn import (logit_target, gaussian_target, gaussian_target_from_dist,
-                            safe_log, q_sample, cosine_alpha_bar, log_sinkhorn)
+                            safe_log, q_sample, cosine_alpha_bar, log_sinkhorn, row_logprob)
 from densifiers import build_densifier, DensifyContext
 from metrics.geo_metric import calculate_geodesic_error, plot_pck
 from .base_model import BaseModel
@@ -25,29 +25,15 @@ class MPNNDiffusionModel(BaseModel):
     def __init__(self, opt):
         super().__init__(opt)
         cfg = opt.get('diffusion', {})
-        self.eta = cfg.get('eta', 0.1)                  # logit_target label-smoothing
+        self.eta = cfg.get('eta', 0.1)                  # logit_target label-smoothing - unused legacy option now
         self.proj_iters = cfg.get('proj_iters', 5)      # Π_S Sinkhorn iterations
-        self.schedule_s = cfg.get('schedule_s', 0.008)  # cosine ᾱ offset
+        self.schedule_s = cfg.get('schedule_s', 0.008)  # cosine schedule offset
         self.logsnr_shift = cfg.get('logsnr_shift', 0.0) # uniform log-SNR shift (nats); 0 = plain cosine
         self.sample_steps = cfg.get('sample_steps', 50) # reverse steps at inference
         self.final_iters = cfg.get('final_iters', 20)   # Sinkhorn iters for the final DS snap
-        # projected-reverse sampling (inference only): after each DDIM update, re-embed the
-        # iterate as the log of its Sinkhorn projection so the carried score itself stays
-        # (approximately) on the polytope, not just the read-in. Default False = the standard
-        # loop where the score is carried raw and only the read-in P_t is projected. Weights
-        # are unaffected (sampler-only knob), so it can be toggled on an existing checkpoint.
-        self.reproject = cfg.get('reproject', False)
+        self.reproject = cfg.get('reproject', False)    # DisPOSE style reprojection an additional two times per DDIM step
         self.ablate_features = cfg.get('ablate_features', False)
-        # CFG-style conditioning dropout (Ho & Salimans 2022): each TRAIN step, with this
         self.feature_dropout = cfg.get('feature_dropout', 0.0)
-        # train-time t sampler (diagnostics/loss_vs_t_draws.py): under uniform t most steps
-        # draw a near-zero loss -- with features present the loss is ~0 at EVERY t, and even
-        # feature-dropped steps are ~0 below t~0.4. A `t_sampler` block restricts each train
-        # step's t to the measured work band of its conditioning regime (deliberate
-        # reweighting of E_t[L(t)], no importance correction: the low-t loss is tautological,
-        # P_t already contains the answer). `uniform_frac` of steps keep t ~ U[0,1] so the
-        # near-clean regime the reverse sampler visits at inference never atrophies.
-        # None (default) = plain t ~ U[0,1].
         tg = cfg.get('target', {})
         self.target_type = tg.get('type', 'onehot')
         assert self.target_type in ('onehot', 'gaussian'), f'unknown target {self.target_type}'
@@ -56,6 +42,21 @@ class MPNNDiffusionModel(BaseModel):
         self.target_floor = tg.get('floor', 2e-4)       # tail mass past the cutoff (~eta/m's budget)
         self.target_ds = tg.get('doubly_stochastic', False)
         self.target_ds_iters = tg.get('ds_iters', 20)
+
+        # Row-stochastic (non doubly-stochastic) variant. The flag is single-sourced on the
+        # denoiser (networks.denoiser.row_stochastic), read back here so every Sinkhorn read-in
+        # / readout / snap in this model switches to a one-sided row-softmax in lockstep with the
+        # denoiser's internal re-gauge and warps. When set, the target must be row-stochastic too
+        # (col-marginal-free), so identity-at-init and the CE stay coherent. See notes.
+        self.row_stochastic = getattr(self.networks['denoiser'], 'row_stochastic', False)
+        if self.row_stochastic:
+            assert not self.target_ds, \
+                "row_stochastic requires a row-stochastic target (target.doubly_stochastic: false)"
+        # Sparse decode: hungarian = bijective assignment; argmax = per-row (non-bijective, the
+        # natural decode for a row-stochastic map). Independent of the projection mode so it can
+        # be A/B'd on either. Used by validate_single and trajectory_divergence.
+        self.decode = cfg.get('decode', 'hungarian')
+        assert self.decode in ('hungarian', 'argmax'), f"unknown decode {self.decode}"
         ts = cfg.get('t_sampler')
         self.t_sampler = None if ts is None else {
             't_min_drop': ts.get('t_min_drop', 0.35),   # band floor for feature-dropped steps
@@ -63,10 +64,6 @@ class MPNNDiffusionModel(BaseModel):
             'uniform_frac': ts.get('uniform_frac', 0.1),
         }
 
-        # optional map densifier (sparse p2p -> dense whole-shape p2p). A non-learned
-        # post-process kept out of the loss (steps.md Step 3); None => sparse-only. The
-        # densifier may declare densifier.gcn_feats to ask _densify_context for dense GCN
-        # features in its data term (fulfilled here since the model owns the extractor).
         self.densifier = build_densifier(opt.get('densifier'))
 
         # which eval stats validation reports. Sparse (FPS-point geodesic error) is the fast
@@ -117,12 +114,47 @@ class MPNNDiffusionModel(BaseModel):
         return (F_x, F_y, D_x, D_y, P0)
 
     def _row_logprob(self, u):
-        """Π_S(u) as row-normalised log-probabilities (rows sum to 1 exactly, for CE).
+        """Row-normalised log-probabilities of u (rows sum to 1 exactly, for CE).
 
-        log_sinkhorn ends on a column pass, so its rows carry the truncation residual; a
-        final row-normalisation makes each row a clean log-distribution for row-CE."""
+        Row-stochastic mode: a single row log-softmax. DS mode: log_sinkhorn ends on a column
+        pass, so its rows carry the truncation residual; a final row-normalisation makes each
+        row a clean log-distribution for row-CE."""
+        if self.row_stochastic:
+            return row_logprob(u)
         logP = log_sinkhorn(u, n_iters=self.proj_iters)
         return logP - torch.logsumexp(logP, dim=-1, keepdim=True)
+
+    def _read_in(self, u):
+        """Projected read-in P_t (probabilities) the denoiser conditions on: row-softmax in the
+        row-stochastic variant, Sinkhorn Π_S otherwise. Shared by training and sampling."""
+        if self.row_stochastic:
+            return row_logprob(u).exp()
+        return log_sinkhorn(u, n_iters=self.proj_iters).exp()
+
+    def _reproject(self, u):
+        """Re-embed logits onto the assignment manifold in the LOG domain (for the sampler's
+        reproject option): row log-softmax (row-stochastic) or Sinkhorn (DS)."""
+        if self.row_stochastic:
+            return row_logprob(u)
+        return log_sinkhorn(u, n_iters=self.proj_iters)
+
+    def _final_snap(self, u):
+        """Converged read of the final iterate (probabilities) handed to the decoder: row-softmax
+        (row-stochastic) or a longer-iteration Sinkhorn (DS)."""
+        if self.row_stochastic:
+            return row_logprob(u).exp()
+        return log_sinkhorn(u, n_iters=self.final_iters).exp()
+
+    def _decode(self, P0):
+        """Sparse Y->X p2p (n_y,) from a soft assignment P0 (n_y, n_x). hungarian = bijective
+        (Hungarian on the full matrix); argmax = per-row best match (non-bijective, the natural
+        row-stochastic decode). Returns a CPU long tensor."""
+        if self.decode == 'argmax':
+            return P0.argmax(-1).detach().cpu().long()
+        row_ind, col_ind = linear_sum_assignment(-P0.detach().cpu().numpy())
+        p2p = torch.empty(P0.shape[0], dtype=torch.long)
+        p2p[torch.as_tensor(row_ind)] = torch.as_tensor(col_ind)
+        return p2p
 
     def _forward_ce(self, F_x, F_y, D_x, D_y, P0, u0, t):
         """One noised forward at time t: returns (row-CE loss, row log-probs).
@@ -130,7 +162,7 @@ class MPNNDiffusionModel(BaseModel):
         target, the geodesic soft target otherwise). Shared by the training step and the
         loss-vs-t diagnostic."""
         u_t = q_sample(u0, t, s=self.schedule_s, logsnr_shift=self.logsnr_shift)  # VP forward marginal
-        P_t = log_sinkhorn(u_t, n_iters=self.proj_iters).exp()     # Π_S read-in (DS)
+        P_t = self._read_in(u_t)                                   # read-in (row-softmax or Π_S)
         u0_hat = self.networks['denoiser'](P_t, F_x, F_y, D_x, D_y, t)
         logP = self._row_logprob(u0_hat)                           # row log-distribution
         loss = -(P0 * logP).sum(-1).mean()                         # assignment-space row-CE
@@ -192,7 +224,8 @@ class MPNNDiffusionModel(BaseModel):
     # ------------------------------------------------------------------ #
     @torch.no_grad()
     def sample(self, F_x, F_y, D_x, D_y, steps=None, return_trajectory=False, sample_eta=0.0):
-        """DDIM (predict-x0) reverse process in logit space. Returns P0 (B, n_y, n_x) DS.
+        """DDIM (predict-x0) reverse process in logit space. Returns P0 (B, n_y, n_x),
+        row-stochastic or doubly-stochastic per the projection mode.
         """
         steps = steps or self.sample_steps
         net = self.networks['denoiser']
@@ -203,10 +236,10 @@ class MPNNDiffusionModel(BaseModel):
         traj = []
         for i in range(steps):
             t_i, t_prev = ts[i], ts[i + 1]
-            P_t = log_sinkhorn(u, n_iters=self.proj_iters).exp()   # tau=1, as in training
+            P_t = self._read_in(u)                                 # read-in, as in training
             u0_hat = net(P_t, F_x, F_y, D_x, D_y, t_i.reshape(1).expand(B))
-            if self.reproject:                                    
-                u0_hat = log_sinkhorn(u0_hat, n_iters=self.proj_iters)
+            if self.reproject:
+                u0_hat = self._reproject(u0_hat)
             if return_trajectory:                                  # cheap running snap
                 traj.append(self._row_logprob(u0_hat).argmax(-1))  # (B, n_y): current match
 
@@ -220,23 +253,20 @@ class MPNNDiffusionModel(BaseModel):
             u = ab_p.sqrt() * u0_hat + ((1.0 - ab_p) - sigma ** 2).clamp_min(0.0).sqrt() * eps_hat
             if sample_eta > 0.0:
                 u = u + sigma * torch.randn_like(u)
-            if self.reproject:                                     # re-embed onto the polytope
-                u = log_sinkhorn(u, n_iters=self.proj_iters)       # = log(Pi_S(u)), no exp/log round-trip
+            if self.reproject:                                     # re-embed onto the manifold
+                u = self._reproject(u)                             # = log(read(u)), no exp/log round-trip
 
-        P0 = log_sinkhorn(u, n_iters=self.final_iters).exp()       # converged DS for Hungarian
+        P0 = self._final_snap(u)                                   # converged read for the decoder
         if return_trajectory:
             return P0, torch.stack(traj, dim=1), ts[:-1]           # (B,n,n), (B,steps,n_y), (steps,)
         return P0
 
     @torch.no_grad()
     def validate_single(self, data):
-        """Sample, Hungarian-snap. Returns sparse p2p (n_y,): sparse Y-index -> sparse X-index."""
+        """Sample, then decode. Returns sparse p2p (n_y,): sparse Y-index -> sparse X-index."""
         F_x, F_y, D_x, D_y, _ = self._sparse_inputs(data)
         P0 = self.sample(F_x, F_y, D_x, D_y)[0]                    # (n_y, n_x)
-        row_ind, col_ind = linear_sum_assignment(-P0.detach().cpu().numpy())
-        p2p = torch.empty(P0.shape[0], dtype=torch.long)
-        p2p[torch.as_tensor(row_ind)] = torch.as_tensor(col_ind)
-        return p2p
+        return self._decode(P0)
 
     @torch.no_grad()
     def _dense_gcn_feats(self, verts, dist, chunk=1024):
@@ -322,9 +352,7 @@ class MPNNDiffusionModel(BaseModel):
         maps = []
         for _ in range(n_samples):
             P0 = self.sample(F_x, F_y, D_x, D_y)[0]
-            row_ind, col_ind = linear_sum_assignment(-P0.detach().cpu().numpy())
-            p = np.empty(P0.shape[0], dtype=int); p[row_ind] = col_ind
-            maps.append(p)
+            maps.append(self._decode(P0).numpy())
         maps = np.stack(maps)
         disagree = [np.mean(maps[i] != maps[j])
                     for i in range(len(maps)) for j in range(i + 1, len(maps))]
