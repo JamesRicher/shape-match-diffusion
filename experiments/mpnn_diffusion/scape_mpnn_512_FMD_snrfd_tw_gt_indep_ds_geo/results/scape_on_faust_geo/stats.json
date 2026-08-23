@@ -1,0 +1,25 @@
+{
+  "name": "scape_mpnn_512_FMD_snrfd_tw_gt_indep_ds_geo",
+  "eval_tag": "scape_on_faust_geo",
+  "checkpoint": "experiments/mpnn_diffusion/scape_mpnn_512_FMD_snrfd_tw_gt_indep_ds_geo/models/final.pth",
+  "dataset": {
+    "name": "Faust_r",
+    "type": "SparsePairFaustDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "geodesic"
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.019667770713567734,
+  "auc": 0.8113175518341308,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.020098373293876648,
+  "sparse_acc": 0.7988127055921053,
+  "sparse_auc": 0.8887535407529239,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}

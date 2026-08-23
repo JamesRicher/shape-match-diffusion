@@ -1,0 +1,26 @@
+{
+  "name": "smal_mpnn_512_FMD_xyz_snrfd_tw_gt_indep_ds_geo",
+  "eval_tag": "smal_geo",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/mpnn_diffusion/smal_mpnn_512_FMD_xyz_snrfd_tw_gt_indep_ds_geo/models/final.pth",
+  "dataset": {
+    "name": "Smal_r",
+    "type": "SparsePairSmalDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "category": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "geodesic"
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.07270048558712006,
+  "auc": 0.5873127924301274,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.12297503650188446,
+  "sparse_acc": 0.4097964638157895,
+  "sparse_auc": 0.5789777659406568,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}

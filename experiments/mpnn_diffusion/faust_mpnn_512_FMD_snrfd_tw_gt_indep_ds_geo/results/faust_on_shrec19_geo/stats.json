@@ -1,0 +1,25 @@
+{
+  "name": "faust_mpnn_512_FMD_snrfd_tw_gt_indep_ds_geo",
+  "eval_tag": "faust_on_shrec19_geo",
+  "checkpoint": "experiments/mpnn_diffusion/faust_mpnn_512_FMD_snrfd_tw_gt_indep_ds_geo/models/final.pth",
+  "dataset": {
+    "name": "Shrec19_r",
+    "type": "SparsePairShrec19Dataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "geodesic"
+  },
+  "num_test_pairs": 407,
+  "dense_error": 0.05970609933137894,
+  "auc": 0.6328323631953997,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.06730092316865921,
+  "sparse_acc": 0.5075965525184275,
+  "sparse_auc": 0.6870008729028615,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}
