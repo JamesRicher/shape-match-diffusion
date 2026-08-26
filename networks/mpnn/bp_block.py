@@ -265,37 +265,69 @@ class BPBlock(nn.Module):
 
 
 class BPStage(nn.Module):
-    """The BP subsystem: one BPBlock, its position in the trunk, and the static caches.
+    """The BP subsystem: one BPBlock per site, their positions in the trunk, and the caches.
 
     Kept as one self-contained module so the denoiser's integration is three lines and
     `bp: null` (the default) leaves zero parameters and zero code path behind.
+
+    `at_block` is an int (one site, the normal case) or a list of ints (several sites).
+    MULTI-SITE EXISTS TO ASK ONE QUESTION: does BP want to act as evidence the trunk then
+    reasons with (an early site, whose write reaches the tokens through `rewarp`) or as a
+    corrector on the near-final state (the last block, whose write lands on u0_hat)? Those
+    roles are complementary, not exclusive, so `at_block: [1, 5]` lets the run self-select
+    via the per-site effective writes. Each site gets its OWN BPBlock: beta(c) and g(c) are
+    functions of the conditioning spine and c is fixed within a forward, so weight-sharing
+    would force identical gates at every site and destroy exactly the signal being measured.
+
+    Note this is NOT the superseded per-block stack (one call at every one of `depth`
+    blocks, which trained gates collapsed to ~one). Sites are chosen, not automatic, and
+    carry no cross-block exclusion machinery.
 
     Usage inside a denoiser forward:
 
         cache = bp.init_cache(F_x, F_y, geo_x, geo_y)        # once
         ...
         u = bp(i, u, cache, F_x, F_y, geo_x, geo_y, c)       # per block; no-op unless
-                                                             # i == at_block
+                                                             # i in at_blocks
+
+    Contract: `u` arrives re-gauged (a log-distribution, since the unary is beta*u) and the
+    caller re-gauges the additive write on the way out.
     """
 
-    def __init__(self, depth: int, dim: int, *, at_block: int = 0,
+    def __init__(self, depth: int, dim: int, *, at_block: int | list[int] = 0,
                  k_graph: int | None = None, **block_kwargs):
         super().__init__()
-        if not 0 <= at_block < depth:
-            raise ValueError(f"at_block must be in [0, {depth}), got {at_block}")
-        self.at_block = at_block
-        self.block = BPBlock(dim, **block_kwargs)
+        sites = [at_block] if isinstance(at_block, int) else list(at_block)
+        if not sites:
+            raise ValueError("at_block must name at least one block")
+        for b in sites:
+            if not isinstance(b, int) or not 0 <= b < depth:
+                raise ValueError(f"at_block entries must be ints in [0, {depth}), got {b}")
+        if len(set(sites)) != len(sites):
+            raise ValueError(f"duplicate at_block entries: {sites}")
+        self.at_blocks = tuple(sorted(sites))
+        # `sites`, not `blocks`: bp_gate_profile keys the superseded per-block stack off
+        # `bp.blocks.{i}.*` in the state dict, and a multi-site stage is a different thing.
+        self.sites = nn.ModuleList(BPBlock(dim, **block_kwargs) for _ in self.at_blocks)
         self.k_graph = k_graph          # None -> reuse the trunk's k_intra graph
-        self.k_feat = self.block.k_feat
+        self.k_feat = self.sites[0].k_feat
         self.stats: dict[str, float] = {}
+
+    @property
+    def at_block(self) -> int:
+        """Back-compat single-site accessor; raises if this stage has several sites."""
+        if len(self.at_blocks) != 1:
+            raise AttributeError(f"multi-site BP stage {self.at_blocks}; use at_blocks")
+        return self.at_blocks[0]
 
     def set_n_sweeps(self, n: int) -> None:
         """Test-time inference-effort knob: train at n_sweeps, evaluate at 1/2/4/8/16.
         Monotone improvement past the trained count is the evidence BP performs
-        inference rather than smoothing (notes/BP-idea.md diagnostics). With one call
-        the reading is clean — previously six interacting calls made it uninterpretable.
+        inference rather than smoothing (notes/BP-idea.md diagnostics). Applies to every
+        site, so a multi-site stage is still scaled by one number.
         """
-        self.block.n_sweeps = n
+        for blk in self.sites:
+            blk.n_sweeps = n
 
     @torch.no_grad()
     def _graph(self, nbr, D):
@@ -312,15 +344,19 @@ class BPStage(nn.Module):
                 "nbr_y": self._graph(geo_y[0], geo_y[1])}
 
     def forward(self, i: int, u, cache: dict, F_x, F_y, geo_x, geo_y, c):
-        """Run BP and apply its write, but only at block `at_block`; else pass u through."""
-        if i != self.at_block:
+        """Run BP and apply its write, but only at a block in `at_blocks`; else pass through."""
+        if i not in self.at_blocks:
             return u
-        d, stats = self.block(u, F_x, F_y,
-                              (cache["nbr_x"], geo_x[1]), (cache["nbr_y"], geo_y[1]), c,
-                              cand_x=cache["cand_x"], cand_y=cache["cand_y"])
+        s = self.at_blocks.index(i)
+        d, stats = self.sites[s](u, F_x, F_y,
+                                 (cache["nbr_x"], geo_x[1]), (cache["nbr_y"], geo_y[1]), c,
+                                 cand_x=cache["cand_x"], cand_y=cache["cand_y"])
         if not self.training:
             # .item() syncs, so this is eval-only; validation runs every epoch, which is
-            # the cadence these need to be tracked at anyway.
-            self.stats = {"bp/write_abs": d.abs().mean().item(),
-                          **{f"bp/{k}": v.item() for k, v in stats.items()}}
+            # the cadence these need to be tracked at anyway. Single-site keeps the bare
+            # `bp/` prefix; multi-site namespaces per block so the sites cannot overwrite
+            # each other -- reading which site earned the write IS the experiment.
+            p = "bp" if len(self.at_blocks) == 1 else f"bp{i}"
+            self.stats.update({f"{p}/write_abs": d.abs().mean().item(),
+                               **{f"{p}/{k}": v.item() for k, v in stats.items()}})
         return u + d

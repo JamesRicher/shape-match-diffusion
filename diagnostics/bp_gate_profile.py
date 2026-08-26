@@ -57,9 +57,15 @@ def spine_from_sd(sd):
 def block_prefixes(sd):
     """BP parameter prefixes, one per BP call, oldest-layout-first.
 
-    Two layouts exist: the current one-call-per-forward stage (`bp.block.*`) and the
-    superseded per-block stack (`bp.blocks.{i}.*`), which trained checkpoints still use.
+    Three layouts exist: the current per-site stage (`bp.sites.{i}.*`, one entry per block
+    named in at_block -- usually just site 0), the single-site stage it replaced
+    (`bp.block.*`), and the superseded per-block stack (`bp.blocks.{i}.*`), which older
+    trained checkpoints still use. Site index i is a position in at_blocks, NOT a trunk
+    block index; the run's config says which block each maps to.
     """
+    idx = sorted({int(k.split('.')[2]) for k in sd if k.startswith('bp.sites.')})
+    if idx:
+        return [f'bp.sites.{i}' for i in idx]
     if any(k.startswith('bp.block.') for k in sd):
         return ['bp.block']
     idx = sorted({int(k.split('.')[2]) for k in sd if k.startswith('bp.blocks.')})

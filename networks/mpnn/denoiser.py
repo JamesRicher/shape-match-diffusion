@@ -14,9 +14,9 @@ Per call (stateless across diffusion steps — only P_t carries the trajectory):
         intra(X), intra(Y)      geodesic MPNN, shared instance      (intra_mpnn)
         cross(X<->Y)            'attn' or 'mpnn' by config          (cross_stage)
         u <- StateWrite(...)    feature/affinity write              (state_track)
-        u <- u + g(c)*Δ_bp      belief propagation, ONCE per forward at
-                                block bp.at_block                   (bp_block)
         u <- soft_project_sym   cheap re-gauge, transpose-symmetric
+        u <- u + g(c)*Δ_bp      belief propagation, at each block in bp.at_block
+                                (one site unless a list), then re-gauged  (bp_block)
         rewarp(X), rewarp(Y)    refreshed belief back into tokens
 
     return u  (identity at init: all writes gated to zero -> u0_hat = log P_t).
@@ -159,9 +159,14 @@ class MPNNMatrixDenoiser(nn.Module):
             hx, hy = cross(hx, hy, u, c, cand_x=cand_x, cand_y=cand_y)
 
             u = write(hx, hy, u, c)
-            if self.bp is not None:                      # BP sees the freshest state,
-                u = self.bp(i, u, bp_cache, F_x, F_y, geo_x, geo_y, c)   # no-op off at_block
-            u = self._regauge(u)                         # ...and is re-gauged (row / DS)
+            # Re-gauge BEFORE BP, not after: BP's unary is beta*u with beta calibrated as a
+            # scale on a LOG-PROBABILITY, but StateWrite returns u + gate(c)*du -- off-gauge by
+            # a gate-driven, hence t-dependent, amount. Reading that directly made beta absorb
+            # a moving gauge error on top of its actual job.
+            u = self._regauge(u)
+            if self.bp is not None and i in self.bp.at_blocks:
+                u = self.bp(i, u, bp_cache, F_x, F_y, geo_x, geo_y, c)
+                u = self._regauge(u)                     # BP's additive write, likewise
 
             if i < len(self.rewarp):                     # refreshed belief bridge
                 P_y, P_x = self._warps(u)

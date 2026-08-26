@@ -185,14 +185,14 @@ def test_bp_gates_at_init():
     """g = 0, beta = beta_init, and (when enabled) w = 1 exactly at init."""
     net = _build("mpnn", bp=BP_CFG)
     c = torch.randn(4, 32)
-    blk = net.bp.block
+    blk = net.bp.sites[0]
     with torch.no_grad():
         g = blk.g_scale * blk.g_head(c)
         beta = blk._beta(c)
     ok = _report("[bp] output gate g = 0 at init", g.abs().max().item())
     ok &= _report("[bp] beta = beta_init, constant in t", (beta - 0.5).abs().max().item())
 
-    gated = _build("mpnn", bp={**BP_CFG, "cycle_gate": True}).bp.block
+    gated = _build("mpnn", bp={**BP_CFG, "cycle_gate": True}).bp.sites[0]
     with torch.no_grad():
         w = gated._gate(torch.rand(4, 16), c)
     return ok and _report("[bp] agreement gate w = 1 at init", (w - 1).abs().max().item())
@@ -202,7 +202,7 @@ def test_bp_beta_bounds():
     """beta stays inside (beta_min, beta_max) for any head output, and cannot saturate
     to a dead gradient at either end (notes: the softplus version reached 0.000 and 9.6).
     """
-    blk = _build("mpnn", bp={**BP_CFG, "beta_min": 0.1, "beta_max": 4.0}).bp.block
+    blk = _build("mpnn", bp={**BP_CFG, "beta_min": 0.1, "beta_max": 4.0}).bp.sites[0]
     with torch.no_grad():                       # drive the head hard in both directions
         blk.beta_head[-1].bias.fill_(-50.0)
         lo = blk._beta(torch.randn(8, 32))
@@ -229,7 +229,7 @@ def test_bp_writes_when_gated_on():
     fx, fy, Dx, Dy, P_t, t = _make_inputs(2, 16, 8)
     with torch.no_grad():
         base = net(P_t, fx, fy, Dx, Dy, t)
-        net.bp.block.g_head[-1].bias.fill_(0.5)
+        net.bp.sites[0].g_head[-1].bias.fill_(0.5)
         moved = net(P_t, fx, fy, Dx, Dy, t)
     d = (moved - base).abs().max().item()
     ok = d > 1e-4 and torch.isfinite(moved).all()
@@ -249,7 +249,7 @@ def test_bp_runs_once_at_configured_block():
     depth, at = 3, 1
     net = _build("mpnn", depth=depth, bp={**BP_CFG, "at_block": at})
     with torch.no_grad():
-        net.bp.block.g_head[-1].bias.fill_(0.5)
+        net.bp.sites[0].g_head[-1].bias.fill_(0.5)
     fx, fy, Dx, Dy, P_t, t = _make_inputs(2, 16, 8)
     idx_x, _ = net._geo(Dx)
     idx_y, _ = net._geo(Dy)
@@ -264,20 +264,69 @@ def test_bp_runs_once_at_configured_block():
     print(f"[{'PASS' if ok else 'FAIL'}] [bp] runs once, at at_block={at}"
           f"{'':<20} writes={['%.1e' % v for v in fired]}")
 
-    bad = False
-    try:
-        _build("mpnn", depth=depth, bp={**BP_CFG, "at_block": depth})
-    except ValueError:
-        bad = True
-    print(f"[{'PASS' if bad else 'FAIL'}] [bp] at_block out of range rejected")
-    return ok and bad
+    bad = 0
+    for cfg in ({"at_block": depth},          # out of range
+                {"at_block": []},             # no site at all
+                {"at_block": [0, 0]},         # duplicate site
+                {"at_block": [0, depth]}):    # one entry out of range
+        try:
+            _build("mpnn", depth=depth, bp={**BP_CFG, **cfg})
+        except ValueError:
+            bad += 1
+    print(f"[{'PASS' if bad == 4 else 'FAIL'}] [bp] bad at_block rejected"
+          f"{'':<25} {bad}/4")
+    return ok and bad == 4
+
+
+def test_bp_multi_site():
+    """`at_block: [a, b]` must fire at exactly those blocks, with INDEPENDENT gates.
+
+    Weight-shared sites would write identically at every site (beta and g are functions of
+    c, which is fixed within a forward), which is precisely the signal the two-site run is
+    meant to measure. Per-site stats must stay separate for the same reason.
+    """
+    torch.manual_seed(7)
+    depth, sites = 6, [1, 5]
+    net = _build("mpnn", depth=depth, bp={**BP_CFG, "at_block": sites})
+    ok = net.bp.at_blocks == tuple(sites) and len(net.bp.sites) == 2
+
+    # distinct parameters, and distinct writes: gate site 1 twice as hard as site 0
+    with torch.no_grad():
+        for s, b in enumerate(net.bp.sites):
+            b.g_head[-1].bias.fill_(0.5 * (s + 1))
+    shared = net.bp.sites[0].g_head[-1].bias is net.bp.sites[1].g_head[-1].bias
+    ok &= not shared
+
+    fx, fy, Dx, Dy, P_t, t = _make_inputs(2, 16, 8)
+    idx_x, _ = net._geo(Dx)
+    idx_y, _ = net._geo(Dy)
+    geo_x, geo_y = (idx_x, Dx), (idx_y, Dy)
+    net.eval()
+    with torch.no_grad():
+        c = net.spine(t)
+        u = safe_log(P_t)
+        cache = net.bp.init_cache(fx, fy, geo_x, geo_y)
+        fired = [(net.bp(i, u, cache, fx, fy, geo_x, geo_y, c) - u).abs().max().item()
+                 for i in range(depth)]
+    ok &= all((v > 1e-4) == (i in sites) for i, v in enumerate(fired))
+    ok &= fired[5] > fired[1]                       # harder gate -> bigger write
+    # stats namespaced per trunk block, so the sites cannot overwrite each other
+    keys = {k.split('/')[0] for k in net.bp.stats}
+    ok &= keys == {"bp1", "bp5"}
+    print(f"[{'PASS' if ok else 'FAIL'}] [bp] multi-site at_block={sites}"
+          f"{'':<19} writes={['%.1e' % v for v in fired]} stats={sorted(keys)}")
+
+    single = _build("mpnn", depth=depth, bp={**BP_CFG, "at_block": 3})
+    compat = single.bp.at_blocks == (3,) and single.bp.at_block == 3
+    print(f"[{'PASS' if compat else 'FAIL'}] [bp] int at_block still supported")
+    return ok and compat
 
 
 def test_bp_sweep_count_override():
     """Test-time inference effort must be settable without touching weights."""
     net = _build("mpnn", bp=BP_CFG)
     net.bp.set_n_sweeps(9)
-    ok = net.bp.block.n_sweeps == 9
+    ok = net.bp.sites[0].n_sweeps == 9
     fx, fy, Dx, Dy, P_t, t = _make_inputs(1, 16, 8)
     with torch.no_grad():
         finite = torch.isfinite(net(P_t, fx, fy, Dx, Dy, t)).all().item()
@@ -298,7 +347,7 @@ def test_bp_checkpoint_equivalence():
         out = net(P_t, fx, fy, Dx, Dy, t)
         out.sum().backward()
         outs.append(out.detach())
-        grads.append(net.bp.block.g_head[-1].weight.grad.clone())
+        grads.append(net.bp.sites[0].g_head[-1].weight.grad.clone())
     ok = _report("[bp] checkpoint: same forward", (outs[0] - outs[1]).abs().max().item())
     return ok and _report("[bp] checkpoint: same gradients",
                           (grads[0] - grads[1]).abs().max().item(), tol=1e-5)
@@ -325,6 +374,7 @@ if __name__ == "__main__":
                               test_bp_beta_bounds,
                               test_bp_writes_when_gated_on,
                               test_bp_runs_once_at_configured_block,
+                              test_bp_multi_site,
                               test_bp_sweep_count_override,
                               test_bp_checkpoint_equivalence)]
     print(f"\n{sum(results)}/{len(results)} property groups passed")

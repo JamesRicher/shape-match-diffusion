@@ -1,0 +1,96 @@
+# scape_mpnn_full_FMD_snrfd_tw_gt_indep_rs: FULL-RESOLUTION row-stochastic variant.
+# Derived from scape_mpnn_512_FMD_snrfd_tw_gt_indep_rs.yaml with two changes:
+#   * n_sparse raised from 512 to the full template coverage T (every covered vertex is an
+#     anchor/query) -- "full resolution" on the supervised (template-covered) set. Non-covered
+#     vertices have no GT image under independent_train, so T is the true ceiling, NOT the raw
+#     ~5k mesh vertex count. Set N_SPARSE below to the min unique-coverage count across shapes.
+#   * densifier block removed -> the sparse (per-row argmax) map IS the final full-res map; no
+#     FunctionalMapDensifier upsampling. eval.dense forced off (no densifier to report through).
+# Memory note: the gaussian target gt_cross_dist is (T, T) per pair; at T~3-5k that is ~100MB
+# of fp32 on device before the model even runs. Watch VRAM; drop batch/step counts if it OOMs.
+name: scape_mpnn_full_FMD_snrfd_tw_gt_indep_rs
+group: mpnn_diffusion               # experiments/<group>/<name>/
+model_type: MPNNDiffusionModel
+is_train: true
+
+path:
+  resume_state: extractor_experiments/diffusion_net/scape_diffusionnet_hks/models/best.pth
+  resume: false                     # net-only load of the pretrained EXTRACTOR weights above.
+                                    # Keep false for the initial launch. To later RESUME this run,
+                                    # set true AND point resume_state (or --resume) at THIS run's
+                                    # own models/latest.pth -- see the two-scenario note below.
+
+datasets:
+  # n_sparse = 3000: SCAPE_r .vts is 5000-long but MANY-TO-ONE, so only ~3092-3352 unique
+  # covered vertices per shape (min 3092). 3000 sits safely under that floor -- the true
+  # "full resolution" ceiling for the supervised (covered) set. The ~1900 non-corresponded
+  # mesh vertices per shape have no GT image and cannot be supervised under independent_train.
+  train: {name: Scape_r, type: SparsePairScapeDataset, phase: train, n_sparse: 3000, exclude_self: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  val:   {name: Scape_r, type: SparsePairScapeDataset, phase: test,  n_sparse: 3000, exclude_self: true, fps_metric: euclidean, ret_evecs: true, num_evecs: 128}
+  test:  {name: Scape_r, type: SparsePairScapeDataset, phase: test,  n_sparse: 3000, exclude_self: true, ret_evecs: true, num_evecs: 200, fps_metric: euclidean}
+
+networks:
+  extractor:
+    type: DiffusionNetExtractor
+    out_dim: 128
+    input_type: hks
+    hidden: 128
+    n_block: 4
+    k_eig: 128
+    hks_count: 16
+  denoiser:
+    type: MPNNMatrixDenoiser
+    feat_dim: 128
+    dim: 128
+    depth: 6
+    heads: 4              # cross-attention heads (used only when cross_type=attn)
+    cross_type: mpnn      # candidate-graph GNN cross stage (feature-kNN ∪ state top-k)
+    k_intra: 12           # geodesic-kNN degree for the intra message-passing graph
+    k_feat: 10            # static feature-kNN candidates per receiver (cross)
+    k_state: 10           # dynamic state-top-k candidates per receiver (cross)
+    n_rbf: 16             # RBF basis size (distance + state-value filters)
+    rbf_max: 3.0          # upper end of the normalised-distance RBF grid
+    inner_iters: 3        # DS-only re-gauge iters; a no-op under row_stochastic
+    dropout: 0.0
+    row_stochastic: true  # row-softmax re-gauge + induced X->Y posterior warp (no DS/Sinkhorn)
+    # no bp: block -> BP disabled (BP is unsupported with row_stochastic)
+
+diffusion:
+  eta: 0.0
+  proj_iters: 6          # DS-only; a no-op under row_stochastic
+  schedule_s: 0.008
+  logsnr_shift: 0.0
+  feature_dropout: 0.0   # OFF for this variant
+  decode: argmax         # per-row (non-bijective) decode
+  t_sampler:
+    t_min_drop: 0.35
+    t_min_feat: 0.35
+    uniform_frac: 0.15
+  target:
+    type: gaussian       # REQUIRED for independent-FPS training (asserted in _target)
+    sigma: 0.03
+    cutoff: 0.09
+    floor: 2.0e-4
+    doubly_stochastic: false  # row-stochastic (per-query) target, required by row_stochastic
+  sample_steps: 50
+  final_iters: 20        # DS-only; a no-op under row_stochastic
+
+# densifier block intentionally removed: full-resolution sparse map is the final map.
+
+eval:
+  sparse: true
+  dense: false           # no densifier -> nothing to densify/report through
+
+train:
+  total_epochs: 40
+  log_freq: 20
+  independent_train_prob: 1.0   # (A) full honest independent-FPS training; 0 = bijective (default)
+  optims:
+    extractor: {type: AdamW, lr: 1e-4, weight_decay: 1e-4}
+    denoiser:  {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+  schedulers:
+    extractor: {type: CosineAnnealingLR, eta_min: 1e-5}
+    denoiser:  {type: CosineAnnealingLR, eta_min: 1e-4}
+
+val:
+  subset: 40

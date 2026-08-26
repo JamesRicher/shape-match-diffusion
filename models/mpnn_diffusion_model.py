@@ -236,7 +236,10 @@ class MPNNDiffusionModel(BaseModel):
         traj = []
         for i in range(steps):
             t_i, t_prev = ts[i], ts[i + 1]
-            P_t = self._read_in(u)                                 # read-in, as in training
+            # read-in, as in training. Under reproject the step ends on _reproject, so from
+            # i>0 the read-in is an idempotent no-op on an already-projected u -- exp it
+            # directly and skip the redundant Sinkhorn/softmax.
+            P_t = u.exp() if (self.reproject and i > 0) else self._read_in(u)
             u0_hat = net(P_t, F_x, F_y, D_x, D_y, t_i.reshape(1).expand(B))
             if self.reproject:
                 u0_hat = self._reproject(u0_hat)
@@ -455,7 +458,9 @@ class MPNNDiffusionModel(BaseModel):
         bp = getattr(getattr(self.networks['denoiser'], 'bp', None), 'stats', None)
         if bp:
             result.update(bp)
-            logger.info("BP: " + " ".join(f"{k.split('/')[-1]}={v:+.4f}" for k, v in bp.items()))
+            # strip only the single-site 'bp/' prefix: a multi-site stage namespaces per
+            # trunk block ('bp1/', 'bp5/'), and that prefix is the whole point of the run.
+            logger.info("BP: " + " ".join(f"{k.removeprefix('bp/')}={v:+.4f}" for k, v in bp.items()))
 
         if first_data is not None and self.diag_loss_vs_t:
             curve = self.loss_vs_t(first_data, self.diag_bins, self.diag_repeats)
