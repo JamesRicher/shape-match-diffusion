@@ -322,6 +322,45 @@ def test_bp_multi_site():
     return ok and compat
 
 
+def test_bp_fixed_beta_g():
+    """beta_fixed / g_fixed must pin the value exactly, drop the head, and stay constant in t.
+
+    NOTE g_fixed != 0 deliberately breaks identity-at-init: BP writes from step 0. That is the
+    point -- a zero-init gate needs a head of ~5.5 to reach the swept optimum g=16.
+    """
+    net = _build("mpnn", bp={**BP_CFG, "beta_fixed": 0.25, "g_fixed": 16.0}).eval()
+    blk = net.bp.sites[0]
+    ok = blk.beta_head is None and blk.g_head is None
+    n_bp = sum(p.numel() for n, p in net.named_parameters() if n.startswith('bp.'))
+    ok &= n_bp == 0
+
+    fx, fy, Dx, Dy, P_t, _ = _make_inputs(2, 16, 8)
+    vals = []
+    for t in (0.05, 0.5, 0.95):                       # beta/g must not vary with t
+        with torch.no_grad():
+            c = net.spine(torch.full((2,), t))
+            vals.append((blk._beta(c).mean().item(), blk._g(c).mean().item()))
+    ok &= all(abs(b - 0.25) < 1e-6 and abs(g - 16.0) < 1e-6 for b, g in vals)
+
+    with torch.no_grad():
+        out = net(P_t, fx, fy, Dx, Dy, torch.full((2,), 0.5))
+    writes = blk(safe_log(P_t), fx, fy, (net._geo(Dx)[0], Dx), (net._geo(Dy)[0], Dy),
+                 net.spine(torch.full((2,), 0.5)))[0]
+    ok &= torch.isfinite(out).all().item() and writes.abs().max().item() > 1e-3
+
+    learned = _build("mpnn", bp=BP_CFG).bp.sites[0]   # default path untouched
+    ok &= learned.beta_head is not None and learned.g_head is not None
+    bad = 0
+    for cfg in ({"beta_fixed": 0.0}, {"g_fixed": 25.0}):   # g_max=20
+        try:
+            _build("mpnn", bp={**BP_CFG, **cfg})
+        except ValueError:
+            bad += 1
+    print(f"[{'PASS' if ok and bad == 2 else 'FAIL'}] [bp] beta_fixed / g_fixed"
+          f"{'':<28} bp_params={n_bp} beta,g={vals[0]} rejected={bad}/2")
+    return ok and bad == 2
+
+
 def test_bp_sweep_count_override():
     """Test-time inference effort must be settable without touching weights."""
     net = _build("mpnn", bp=BP_CFG)
@@ -375,6 +414,7 @@ if __name__ == "__main__":
                               test_bp_writes_when_gated_on,
                               test_bp_runs_once_at_configured_block,
                               test_bp_multi_site,
+                              test_bp_fixed_beta_g,
                               test_bp_sweep_count_override,
                               test_bp_checkpoint_equivalence)]
     print(f"\n{sum(results)}/{len(results)} property groups passed")

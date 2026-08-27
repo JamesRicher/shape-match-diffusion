@@ -6,16 +6,22 @@ correspondence — the rest of the surface is uncovered. This script draws the m
 as a polyscope surface and overlays the covered vertices as a point cloud on top,
 so you can see how much of the shape the template actually reaches.
 
+Datasets without a per-shape .vts (SHREC19_r, whose GT is per-pair) simply drop the
+overlay, leaving a plain slider browser over the meshes.
+
 Example:
     python -m vis.gt_coverage_vis --type SingleFaustDataset --name Faust_r --phase test --index 0
+    python -m vis.gt_coverage_vis --type SingleShrec19Dataset --name Shrec19_r
 """
 import argparse
+import inspect
 import sys
 import numpy as np
 import polyscope as ps
 import polyscope.imgui as psim
 
 from datasets import build_dataset
+from utils.registry import DATASET_REGISTRY
 
 
 BASE_COLOR = np.array([0.85, 0.85, 0.85], dtype=np.float32)   # the mesh surface
@@ -38,28 +44,36 @@ class GTCoverageVis:
 
         verts = _to_numpy(item["verts"]).astype(np.float32)
         faces = _to_numpy(item["faces"]).astype(np.int64)
-        # unique vertices reached by the template (corr may list a vertex more than once)
-        covered = np.unique(_to_numpy(item["corr"]).astype(np.int64))
         name = item.get("name", self.index)
 
         ps.register_surface_mesh(f"mesh [{name}]", verts, faces, smooth_shade=True,
                                  color=BASE_COLOR)
 
-        # radius is relative to the scene bounding box, so a fixed value reads on any dataset
-        pc = ps.register_point_cloud("gt_covered", verts[covered], radius=0.005)
-        pc.add_color_quantity("covered",
-                              np.tile(COVERED_COLOR, (len(covered), 1)), enabled=True)
+        if "corr" in item:
+            # unique vertices reached by the template (corr may list a vertex more than once)
+            covered = np.unique(_to_numpy(item["corr"]).astype(np.int64))
+            # radius is relative to the scene bounding box, so a fixed value reads on any dataset
+            pc = ps.register_point_cloud("gt_covered", verts[covered], radius=0.005)
+            pc.add_color_quantity("covered",
+                                  np.tile(COVERED_COLOR, (len(covered), 1)), enabled=True)
+            n_cov = len(covered)
+            print(f"[{name}] covered {n_cov} / {verts.shape[0]} vertices "
+                  f"({100.0 * n_cov / verts.shape[0]:.1f}%)")
+        else:
+            n_cov = None
+            print(f"[{name}] {verts.shape[0]} vertices, {faces.shape[0]} faces (no per-shape GT)")
 
-        self._stats = (name, len(covered), verts.shape[0])
-        print(f"[{name}] covered {len(covered)} / {verts.shape[0]} vertices "
-              f"({100.0 * len(covered) / verts.shape[0]:.1f}%)")
+        self._stats = (name, n_cov, verts.shape[0])
 
     def ui_callback(self):
         name, n_cov, n_tot = self._stats
         psim.TextUnformatted("GT template-coverage viewer")
         psim.TextUnformatted(f"shape: {name}")
-        psim.TextUnformatted(f"covered: {n_cov} / {n_tot} "
-                             f"({100.0 * n_cov / n_tot:.1f}%)")
+        if n_cov is None:
+            psim.TextUnformatted(f"vertices: {n_tot} (no per-shape GT)")
+        else:
+            psim.TextUnformatted(f"covered: {n_cov} / {n_tot} "
+                                 f"({100.0 * n_cov / n_tot:.1f}%)")
         psim.Separator()
 
         changed, new_idx = psim.SliderInt("shape index", self.index,
@@ -90,6 +104,13 @@ def main(argv=None):
         "ret_dist": False,
         "ret_evecs": False,
     }
+    # not every dataset takes every option (SHREC19 has no phase), and a class that defaults
+    # ret_corr=False ships no per-shape .vts at all -- forcing it on there would just assert.
+    accepted = inspect.signature(DATASET_REGISTRY.get(args.type)).parameters
+    if accepted.get("ret_corr") is not None and accepted["ret_corr"].default is False:
+        dataset_opt.pop("ret_corr")
+    dataset_opt = {k: v for k, v in dataset_opt.items()
+                   if k in ("type", "name") or k in accepted}
     dataset = build_dataset(dataset_opt)
 
     ps.init()

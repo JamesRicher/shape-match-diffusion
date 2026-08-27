@@ -1,0 +1,128 @@
+# dt4d_mpnn_512_ds_geo_bp5_fixed: bp5 with beta and g PINNED instead of learned.
+#
+# Identical to dt4d_mpnn_512_ds_geo_bp5.yaml except beta_fixed / g_fixed replace the two
+# learned heads, so BP has zero trainable parameters and writes at full strength from step 0
+# (identity-at-init no longer holds).
+#
+# WHY. The bp5/bp1/bp1_5 runs learned beta ~3.1 and g ~0.03, against post-process optima of
+# 0.25 and 16 on DT4D-inter -- 12x too high and 550x too low, both muting BP. Reaching g=16
+# needs a head of ~5.5 from a zero init, so "BP does not help" and "the gate never left the
+# origin" are indistinguishable while g is learned. Pinning both separates them:
+#   worse than bp5 -> BP's correction is genuinely wrong in-loop; use the post-process.
+#   better than bp5 -> the gate is a training-dynamics failure, and beta/delta/sigma are
+#                      worth tuning.
+#
+# Needs the no-BP _ds_geo parent trained as a control -- it does not exist yet.
+name: dt4d_mpnn_512_ds_geo_bp5_fixed
+group: penultimate                  # experiments/<group>/<name>/
+model_type: MPNNDiffusionModel
+is_train: true
+seed: 0                             # explicit: the parent sets none, and the seed repeat
+                                    # arm is only meaningful against a pinned baseline seed
+
+path:
+  resume_state: extractor_experiments/diffusion_net/dt4d_diffusionnet_hks/models/best.pth
+  resume: false
+
+datasets:
+  # combined pools (ULRSSM): intra with exclude_self; inter has no diagonal by construction
+  train:
+    - {name: Dt4d_r, type: SparsePairDT4DDataset, phase: train, inter_class: false, n_sparse: 512, exclude_self: true, fps_metric: geodesic, ret_evecs: true, num_evecs: 128}
+    - {name: Dt4d_r, type: SparsePairDT4DDataset, phase: train, inter_class: true,  n_sparse: 512, fps_metric: geodesic, ret_evecs: true, num_evecs: 128}
+  val:   {name: Dt4d_r, type: SparsePairDT4DDataset, phase: test, inter_class: true, n_sparse: 512, fps_metric: geodesic, ret_evecs: true, num_evecs: 128}
+  test:  {name: Dt4d_r, type: SparsePairDT4DDataset, phase: test, inter_class: true, n_sparse: 512, ret_evecs: true, num_evecs: 200, fps_metric: geodesic}
+
+networks:
+  extractor:
+    type: DiffusionNetExtractor
+    out_dim: 128
+    input_type: hks
+    hidden: 128
+    n_block: 4
+    k_eig: 128
+    hks_count: 16
+  denoiser:
+    type: MPNNMatrixDenoiser
+    feat_dim: 128
+    dim: 128
+    depth: 6
+    heads: 4              # cross-attention heads (used only when cross_type=attn)
+    cross_type: mpnn      # candidate-graph GNN cross stage (feature-kNN ∪ state top-k)
+    k_intra: 12           # geodesic-kNN degree for the intra message-passing graph
+    k_feat: 10            # static feature-kNN candidates per receiver (cross)
+    k_state: 10           # dynamic state-top-k candidates per receiver (cross)
+    n_rbf: 16             # RBF basis size (distance + state-value filters)
+    rbf_max: 3.0          # upper end of the normalised-distance RBF grid
+    inner_iters: 3        # soft-Sinkhorn sweeps in the per-block re-gauge
+    dropout: 0.0
+    bp:                     # belief propagation in the loop (notes/BP-loop-design.md)
+      k_logit: 10           # candidate set: top-k of the current state ...
+      k_feat: 10            #   ... union feature-kNN (static, cached per forward)
+      k_graph: null         # null = reuse the trunk's k_intra geodesic graph
+      sigma: 0.05           # isometric-distortion tolerance (bp_sigma_calibration.py)
+      delta: 4.0            # potential truncation, outlier robustness
+      tau: 1.0              # 1 = sum-product
+      alpha: 0.5            # damping (fixed, not learned)
+      slack: -4.0           # abstention score for unproposed matches
+      at_block: 5           # last block: BP as corrector, matching the bp5 arm
+      n_sweeps: 10           # train-time inference effort; override at eval
+      beta_fixed: 0.25      # THE ARM. Pinned, not learned: heads dropped, 0 BP params.
+      g_fixed: 4.0         #   Both are the DT4D-inter post-process optima.
+                            #   beta_init/beta_min/beta_max/g_scale are omitted: dead here.
+      bidirectional: true   # 1/2(D_Y + D_X^T) -> exact pair-swap symmetry, no gate needed
+      cycle_gate: false     # OFF: learned v was ~0 in 44/48 blocks, so the round-trip
+                            #   signal was never used -- the gate's bias was an off-switch
+      checkpoint: false     # one call, not six: ~6x less activation memory to trade away
+
+diffusion:
+  eta: 0.0
+  proj_iters: 6
+  schedule_s: 0.008
+  logsnr_shift: 0.0
+  feature_dropout: 0.0   # OFF for this variant
+  t_sampler:
+    t_min_drop: 0.35
+    t_min_feat: 0.35
+    uniform_frac: 0.15
+  target:
+    type: gaussian       # REQUIRED for independent-FPS training (asserted in _target)
+    sigma: 0.03
+    cutoff: 0.09
+    floor: 2.0e-4
+    doubly_stochastic: true   # entropic-OT (Sinkhorn) target vs row-stochastic baseline
+    ds_iters: 20              # Sinkhorn iterations for the target normalisation
+  sample_steps: 50
+  final_iters: 20
+
+densifier:
+  type: FunctionalMapDensifier
+  feat_source: diffnet
+  k_fm: 120
+  n_e: 100
+  lm_bands: 20
+  lm_weight: 5.0
+  mu: 0.1
+  variance: 7.0
+
+eval:
+  sparse: true
+  dense: false
+
+train:
+  # combined pool = 8702 pairs/epoch; 14 epochs ~ FAUST's total-step budget
+  total_epochs: 14
+  log_freq: 20
+  independent_train_prob: 1.0   # (A) full honest independent-FPS training; 0 = bijective (default)
+  optims:
+    extractor: {type: AdamW, lr: 1e-4, weight_decay: 1e-4}
+    denoiser:  {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+  schedulers:
+    extractor: {type: CosineAnnealingLR, eta_min: 1e-5}
+    denoiser:  {type: CosineAnnealingLR, eta_min: 1e-4}
+
+val:
+  subset: 20                # halved: independent-FPS val densifies every pair (see below)
+  independent_fps: true     # validate in the inference regime (no GT in FPS selection).
+                            # Forces eval.sparse=false / eval.dense=true in train.py: the
+                            # sparse diagonal error/acc are undefined without gt_perm, so the
+                            # reported dev number becomes dense MGE through the densifier.

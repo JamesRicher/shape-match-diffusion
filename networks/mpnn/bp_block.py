@@ -82,6 +82,9 @@ class BPBlock(nn.Module):
         n_sweeps: sweeps per call (mutable at eval — see BPStage.set_n_sweeps).
         beta_init: unary scale at init; must lie strictly inside (beta_min, beta_max).
         beta_min, beta_max: the bounds of the learned unary scale (see module docstring).
+        beta_fixed, g_fixed: pin beta / g to a constant and drop that head (no parameters,
+            no gradient). None = learn it. Post-process optima: beta 0.25, g 16 on
+            DT4D-inter; beta 0.5, g 4 global.
         g_scale: initial slope of the output gate (dg/d(head) at init), so the learned
             head works in O(1) units against a post-process optimum of g ~ 4-16.
         g_max: smooth bound on the output gate, |g| < g_max via g = g_max·tanh(raw/g_max)
@@ -109,13 +112,18 @@ class BPBlock(nn.Module):
                  sigma: float = 0.05, delta: float = 4.0, tau: float = 1.0,
                  alpha: float = 0.5, slack: float = -4.0, n_sweeps: int = 8,
                  beta_init: float = 0.5, beta_min: float = 0.1, beta_max: float = 4.0,
+                 beta_fixed: float | None = None, g_fixed: float | None = None,
                  g_scale: float = 4.0, g_max: float = 20.0, bidirectional: bool = True,
                  cycle_gate: bool = False, checkpoint: bool = False):
         super().__init__()
         if cycle_gate and not bidirectional:
             raise ValueError("cycle_gate needs bidirectional=True (it compares the two "
                              "directions' beliefs)")
-        if not 0.0 < beta_min < beta_init < beta_max:
+        if beta_fixed is not None and beta_fixed <= 0.0:
+            raise ValueError(f"beta_fixed must be > 0, got {beta_fixed}")
+        if g_fixed is not None and abs(g_fixed) >= g_max:
+            raise ValueError(f"|g_fixed| must be < g_max={g_max}, got {g_fixed}")
+        if beta_fixed is None and not 0.0 < beta_min < beta_init < beta_max:
             raise ValueError(f"need 0 < beta_min < beta_init < beta_max, got "
                              f"{beta_min} / {beta_init} / {beta_max}")
         self.k_logit, self.k_feat = k_logit, k_feat
@@ -123,25 +131,38 @@ class BPBlock(nn.Module):
         self.alpha, self.slack = alpha, slack
         self.n_sweeps = n_sweeps
         self.beta_min, self.beta_max = beta_min, beta_max
+        self.beta_fixed, self.g_fixed = beta_fixed, g_fixed
         self.g_scale, self.g_max = g_scale, g_max
         self.bidirectional, self.cycle_gate = bidirectional, cycle_gate
         self.checkpoint = checkpoint
 
         # log-space sigmoid: beta = beta_min * (beta_max/beta_min)^sigmoid(head(c)).
         # The bias places beta_init exactly at init; the head weight is zero-init, so
-        # beta is constant in t until training moves it.
-        self.beta_head = _zero_head(dim, 1)
-        frac = math.log(beta_init / beta_min) / math.log(beta_max / beta_min)
-        self.beta_head[-1].bias.data.fill_(_logit(frac))
-        self.g_head = _zero_head(dim, 1)
+        # beta is constant in t until training moves it. A *_fixed value drops the head.
+        if beta_fixed is None:
+            self.beta_head = _zero_head(dim, 1)
+            frac = math.log(beta_init / beta_min) / math.log(beta_max / beta_min)
+            self.beta_head[-1].bias.data.fill_(_logit(frac))
+        else:
+            self.beta_head = None
+        self.g_head = _zero_head(dim, 1) if g_fixed is None else None
         # d = 1: one coefficient on the standardised round-trip mass. There is NO bias
         # term -- see `_gate`.
         self.gate_head = _zero_head(dim, 1) if cycle_gate else None
 
     def _beta(self, c: torch.Tensor) -> torch.Tensor:
         """Bounded unary scale (B, 1), geometrically spaced across [beta_min, beta_max]."""
+        if self.beta_fixed is not None:
+            return c.new_full((c.shape[0], 1), self.beta_fixed)
         s = torch.sigmoid(self.beta_head(c))
         return self.beta_min * (self.beta_max / self.beta_min) ** s
+
+    def _g(self, c: torch.Tensor) -> torch.Tensor:
+        """Output gate (B, 1), smoothly bounded to (-g_max, g_max); see `forward`."""
+        if self.g_fixed is not None:
+            return c.new_full((c.shape[0], 1), self.g_fixed)
+        raw = self.g_scale * self.g_head(c)
+        return self.g_max * torch.tanh(raw / self.g_max)
 
     # ------------------------------------------------------------------ #
     # one directed pass
@@ -259,8 +280,7 @@ class BPBlock(nn.Module):
         # (exact identity), and the initial slope dg/d(head) is still g_scale, so the O(1)
         # head units and the calibrated 4-16 operating band are unchanged in the near-
         # linear region -- g_max only caps the tail.
-        raw = self.g_scale * self.g_head(c).unsqueeze(-1)        # (B,1,1)
-        g = self.g_max * torch.tanh(raw / self.g_max)
+        g = self._g(c).unsqueeze(-1)                             # (B,1,1)
         return g * delta, {"beta": beta.mean(), "g": g.mean(), "msg_delta": md.mean()}
 
 
