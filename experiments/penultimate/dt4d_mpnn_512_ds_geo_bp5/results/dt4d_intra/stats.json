@@ -1,0 +1,30 @@
+{
+  "name": "dt4d_mpnn_512_ds_geo_bp5",
+  "eval_tag": "dt4d_intra",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/penultimate/dt4d_mpnn_512_ds_geo_bp5/models/final.pth",
+  "dataset": {
+    "name": "Dt4d_r",
+    "type": "SparsePairDT4DDataset",
+    "phase": "test",
+    "inter_class": false,
+    "n_sparse": 512,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "geodesic",
+    "exclude_self": true
+  },
+  "num_test_pairs": 740,
+  "dense_error": 0.011149703525006771,
+  "auc": 0.8894260955793697,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "bp/write_abs": 0.001650000223889947,
+  "bp/beta": 3.1089060306549072,
+  "bp/g": 0.029198380187153816,
+  "bp/msg_delta": 0.01590222865343094,
+  "sparse_avg_error": 0.0031514333095401525,
+  "sparse_acc": 0.9501398859797298,
+  "sparse_auc": 0.9737102603313541,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}
