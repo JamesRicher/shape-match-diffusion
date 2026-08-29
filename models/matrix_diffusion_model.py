@@ -296,7 +296,8 @@ class MatrixDiffusionModel(BaseModel):
         extractor (GCN: one patch per vertex; DiffusionNet: one per-vertex forward). The extractor
         is self.networks['extractor'], restored from the joint checkpoint, so these are the fully
         fine-tuned features -- not the pretrained warm start. If no matching extractor is present,
-        feat_x/feat_y are left as loaded so the densifier falls back to its own signal (e.g. WKS)."""
+        feat_x/feat_y are cleared to None; a densifier that requires them (FunctionalMapDensifier)
+        then raises rather than silently substituting a weaker signal."""
         x, y = data['first'], data['second']
         feat_x, feat_y = x.get('feat'), y.get('feat')
         want_feats = self.densifier is not None and getattr(self.densifier, 'wants_model_feats', False)
@@ -309,7 +310,7 @@ class MatrixDiffusionModel(BaseModel):
             elif src == 'gcn' and ext is not None and not is_diffnet:  # dense GCN patch per vertex
                 feat_x = self._dense_gcn_feats(x['verts'], x['dist'])
                 feat_y = self._dense_gcn_feats(y['verts'], y['dist'])
-            else:                                               # cannot produce them -> WKS fallback
+            else:                                               # cannot produce them -> leave unset
                 feat_x, feat_y = None, None                     # never leak a stray .npy feat
         return DensifyContext(
             idx_x=x['sparse']['idx'], idx_y=y['sparse']['idx'],
