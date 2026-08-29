@@ -39,10 +39,6 @@ from networks.mpnn.bp_block import BPStage
 from networks.mpnn.state_track import (InputEmbed, Rewarp, StateWrite,
                                        soft_project_sym)
 
-# Safety rail on the propagating state. NOT U_LO (-18): that is the feature/RBF grid
-# boundary, and railing there would change the CE in healthy training.
-U_RAIL = -100.0
-
 
 @NETWORK_REGISTRY.register()
 class MPNNMatrixDenoiser(nn.Module):
@@ -114,10 +110,10 @@ class MPNNMatrixDenoiser(nn.Module):
     def _regauge(self, u: torch.Tensor) -> torch.Tensor:
         """Re-gauge the state after a write. Row-stochastic: one row log-softmax, so each row is
         a log-distribution (the maintained invariant Z_j = 1). DS: the transpose-symmetric
-        truncated Sinkhorn (pair-swap symmetric). Railed below: log-domain Sinkhorn only shifts
-        rows/cols, so it re-centres a runaway dynamic range without bounding it."""
-        u = row_logprob(u) if self.row_stochastic else soft_project_sym(u, self.inner_iters)
-        return u.clamp_min(U_RAIL)
+        truncated Sinkhorn (pair-swap symmetric)."""
+        if self.row_stochastic:
+            return row_logprob(u)
+        return soft_project_sym(u, n_iters=self.inner_iters)
 
     def _warps(self, u: torch.Tensor):
         """The two warp matrices read off the current state, (P_y, P_x): P_y (B, n_y, n_x) rows=Y
@@ -131,14 +127,9 @@ class MPNNMatrixDenoiser(nn.Module):
         return P, P.transpose(-1, -2)
 
     def forward(self, P_t: torch.Tensor, F_x: torch.Tensor, F_y: torch.Tensor,
-                D_x: torch.Tensor, D_y: torch.Tensor, t: torch.Tensor,
-                log_P_t: torch.Tensor | None = None) -> torch.Tensor:
+                D_x: torch.Tensor, D_y: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """P_t: (B, n_y, n_x) projected read-in Π_S(u_t); F_*: (B, n, feat_dim);
-        D_*: (B, n, n) geodesics; t: (B,) or scalar. Returns u0_hat logits.
-
-        log_P_t: the same read-in already in log space (pass P_t=None). Skips the exp/log
-        round trip, whose safe_log has a 1/x derivative reaching ~1e8 at its 1e-8 floor.
-        """
+        D_*: (B, n, n) geodesics; t: (B,) or scalar. Returns u0_hat logits."""
         c = self.spine(t)
 
         # ---- static per-call precompute ---- #
@@ -151,11 +142,11 @@ class MPNNMatrixDenoiser(nn.Module):
             cand_y = feature_knn(F_y, F_x, k_f)          # Y receivers <- X senders
 
         # ---- state + tokens ---- #
-        u = safe_log(P_t) if log_P_t is None else log_P_t    # gauge-fixed read-in
+        u = safe_log(P_t)                                # gauge-fixed read-in
         # Y warps through rows of P_t; X warps through P_x -- P_t^T under DS, the induced X->Y
         # posterior col_softmax(u)^T under row-stochastic (columns of P_t are not distributions).
-        P_y = P_t if log_P_t is None else u.exp()
-        P_x = self._warps(u)[1] if self.row_stochastic else P_y.transpose(-1, -2)
+        P_y = P_t
+        P_x = self._warps(u)[1] if self.row_stochastic else P_t.transpose(-1, -2)
         hy = self.embed(F_y, P_y, F_x)                   # rows of P: Y pulls back X
         hx = self.embed(F_x, P_x, F_y)
         geo_x, geo_y = (idx_x, D_x), (idx_y, D_y)

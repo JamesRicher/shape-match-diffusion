@@ -162,10 +162,8 @@ class MPNNDiffusionModel(BaseModel):
         target, the geodesic soft target otherwise). Shared by the training step and the
         loss-vs-t diagnostic."""
         u_t = q_sample(u0, t, s=self.schedule_s, logsnr_shift=self.logsnr_shift)  # VP forward marginal
-        # log-domain read-in: _reproject is _read_in without the exp, so the denoiser gets
-        # the logits it wants instead of exponentiating for it to re-log (see its forward).
-        log_P_t = self._reproject(u_t)
-        u0_hat = self.networks['denoiser'](None, F_x, F_y, D_x, D_y, t, log_P_t=log_P_t)
+        P_t = self._read_in(u_t)                                   # read-in (row-softmax or Π_S)
+        u0_hat = self.networks['denoiser'](P_t, F_x, F_y, D_x, D_y, t)
         logP = self._row_logprob(u0_hat)                           # row log-distribution
         loss = -(P0 * logP).sum(-1).mean()                         # assignment-space row-CE
         return loss, logP
@@ -238,10 +236,11 @@ class MPNNDiffusionModel(BaseModel):
         traj = []
         for i in range(steps):
             t_i, t_prev = ts[i], ts[i + 1]
-            # log-domain read-in, as in training. Under reproject the step ends on _reproject,
-            # so from i>0 the read-in is an idempotent no-op on an already-projected u.
-            log_P_t = u if (self.reproject and i > 0) else self._reproject(u)
-            u0_hat = net(None, F_x, F_y, D_x, D_y, t_i.reshape(1).expand(B), log_P_t=log_P_t)
+            # read-in, as in training. Under reproject the step ends on _reproject, so from
+            # i>0 the read-in is an idempotent no-op on an already-projected u -- exp it
+            # directly and skip the redundant Sinkhorn/softmax.
+            P_t = u.exp() if (self.reproject and i > 0) else self._read_in(u)
+            u0_hat = net(P_t, F_x, F_y, D_x, D_y, t_i.reshape(1).expand(B))
             if self.reproject:
                 u0_hat = self._reproject(u0_hat)
             if return_trajectory:                                  # cheap running snap
