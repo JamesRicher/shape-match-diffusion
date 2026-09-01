@@ -1,0 +1,28 @@
+{
+  "name": "dt4d_mpnn_512_final_cold_co",
+  "eval_tag": "dt4d_intra_seed0_nobp",
+  "checkpoint": "experiments/final/dt4d_mpnn_512_final_cold_co/models/final.pth",
+  "dataset": {
+    "name": "Dt4d_r",
+    "type": "SparsePairDT4DDataset",
+    "phase": "test",
+    "inter_class": false,
+    "n_sparse": 512,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "geodesic",
+    "exclude_self": true
+  },
+  "num_test_pairs": 740,
+  "bp": null,
+  "seed": 0,
+  "dense_error": 0.010010363534092903,
+  "auc": 0.9015300447086052,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.004023235756903887,
+  "sparse_acc": 0.9388856630067568,
+  "sparse_auc": 0.9679103375392437,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}

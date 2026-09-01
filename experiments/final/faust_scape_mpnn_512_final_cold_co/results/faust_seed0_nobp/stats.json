@@ -1,0 +1,27 @@
+{
+  "name": "faust_scape_mpnn_512_final_cold_co",
+  "eval_tag": "faust_seed0_nobp",
+  "checkpoint": "experiments/final/faust_scape_mpnn_512_final_cold_co/models/final.pth",
+  "dataset": {
+    "name": "Faust_r",
+    "type": "SparsePairFaustDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "geodesic"
+  },
+  "num_test_pairs": 380,
+  "bp": null,
+  "seed": 0,
+  "dense_error": 0.014910509809851646,
+  "auc": 0.858041360978203,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.003013452747836709,
+  "sparse_acc": 0.9652086759868421,
+  "sparse_auc": 0.9818751349847155,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}

@@ -1,0 +1,37 @@
+{
+  "name": "faust_mpnn_512_final_cold_co",
+  "eval_tag": "shrec19_seed0",
+  "checkpoint": "experiments/final/faust_mpnn_512_final_cold_co/models/final.pth",
+  "dataset": {
+    "name": "Shrec19_r",
+    "type": "SparsePairShrec19Dataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "geodesic"
+  },
+  "num_test_pairs": 407,
+  "bp": {
+    "beta": 0.5,
+    "sigma": 0.02,
+    "g": 2.0,
+    "tau": 1.0,
+    "delta": 4.0,
+    "s": -2.0,
+    "sweeps": 40,
+    "k_cand": 10,
+    "k_graph": 12
+  },
+  "seed": 0,
+  "dense_error": 0.06042926013469696,
+  "auc": 0.6601781888162046,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.04715803638100624,
+  "sparse_acc": 0.6476312960687961,
+  "sparse_auc": 0.7838653881800188,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}

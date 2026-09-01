@@ -1,0 +1,28 @@
+{
+  "name": "smal_mpnn_512_final_cold_co",
+  "eval_tag": "smal_seed0_nobp",
+  "checkpoint": "experiments/final/smal_mpnn_512_final_cold_co/models/final.pth",
+  "dataset": {
+    "name": "Smal_r",
+    "type": "SparsePairSmalDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "category": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "geodesic"
+  },
+  "num_test_pairs": 380,
+  "bp": null,
+  "seed": 0,
+  "dense_error": 0.04479079693555832,
+  "auc": 0.6577402573186905,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.06461483240127563,
+  "sparse_acc": 0.4695775082236842,
+  "sparse_auc": 0.6475728450209329,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}
