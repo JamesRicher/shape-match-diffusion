@@ -1,0 +1,25 @@
+{
+  "name": "scape_mpnn_512_final",
+  "eval_tag": "faust_k200_mu1",
+  "checkpoint": "experiments/final/scape_mpnn_512_final/models/final.pth",
+  "dataset": {
+    "name": "Faust_r",
+    "type": "SparsePairFaustDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "geodesic"
+  },
+  "num_test_pairs": 380,
+  "dense_error": 0.019147595390677452,
+  "auc": 0.8188704385964913,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.012242736294865608,
+  "sparse_acc": 0.8459703947368421,
+  "sparse_auc": 0.9171405928113371,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}
