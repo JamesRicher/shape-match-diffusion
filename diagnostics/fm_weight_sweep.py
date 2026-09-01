@@ -1,4 +1,4 @@
-"""ISOLATED, DELETE-SAFE DIAGNOSTIC -- WKS-vs-landmark weight sweep in the FM densifier.
+"""ISOLATED, DELETE-SAFE DIAGNOSTIC -- feature-vs-landmark weight sweep in the FM densifier.
 
 Everything this script needs lives under diagnostics/; every output it writes goes to
 diagnostics/results/. It modifies no tracked file and registers nothing. To remove it and
@@ -6,8 +6,9 @@ all the data it produced, delete the diagnostics/ directory. Nothing else depend
 
 WHAT IT ANSWERS
 ---------------
-The FunctionalMapDensifier's ONLY symmetry-breaking signal is the landmarks; the global WKS
-block is intrinsically symmetric and cannot tell left from right. So the WKS<->landmark balance
+The FunctionalMapDensifier's global block is the trained extractor's dense descriptors
+(feat_source: diffnet); with an intrinsic input_type (hks) it cannot tell left from right, so
+the landmarks remain the symmetry-breaking signal. The feature<->landmark balance
 (`lm_weight`) directly governs whether the dense map flips. This sweeps `lm_weight` over a
 CACHED sparse map (sample once, re-run only the linear FM solve per weight) and reports the
 dense flip rate / MGE at each weight -- for the model's landmarks and, as a ceiling, for exact

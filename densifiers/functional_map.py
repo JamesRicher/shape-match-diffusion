@@ -3,10 +3,9 @@
 Two signals set the map, both as spectral descriptor-preservation constraints on a functional
 map C (k_y x k_x) that transfers functions from X to Y:
 
-  * global  -- a dense per-vertex descriptor field on both shapes, which fixes the coarse,
-    near-isometric alignment. By default this is the network-free WKS signature (on one shared
-    energy grid so bands correspond); with feat_source=diffnet (or gcn) it is instead the trained
-    extractor's dense descriptors, supplied by the model, falling back to WKS if absent.
+  * global  -- the trained extractor's dense per-vertex descriptors (ctx.feat_x/feat_y, filled
+    by the model before densify; feat_source=diffnet). Carries the mid-band structure: measured
+    on FAUST it holds ~74% of its energy in modes 10-60, with effective rank ~27 of k=120.
   * landmark -- each sparse correspondence enters as wave-kernel "bumps": the Gaussian
     band-passed response of a delta at the landmark, in the standard WKS sense. In the LBO basis
     the bump for landmark p at energy e has the closed-form spectral coefficient
@@ -17,31 +16,44 @@ C is regularised to commute with the Laplacian. Because the basis diagonalises t
 commutativity penalty ||C Lam_x - Lam_y C||^2 = sum_ij C_ij^2 (lam_x_j - lam_y_i)^2 is a per-entry
 mask, so the whole solve decouples into k_y independent ridge regressions (closed form; no
 iterative solver / no pyFM needed). The map is read out by nearest neighbour in the transferred
-spectral embedding. Non-learned; needs ctx.evecs/evals/mass (dataset ret_evecs).
+spectral embedding. Non-learned; needs ctx.evecs/evals/mass (dataset ret_evecs) and dense
+extractor features on ctx.feat_x/feat_y.
 """
 import torch
 
 from utils.registry import DENSIFIER_REGISTRY
-from utils.spectral_features import shared_wks_grid, wks_coefs, wks_on_grid
+from utils.spectral_features import shared_wks_grid, wks_coefs
 from .base_densifier import BaseDensifier, DensifyContext
 from .spectral_refine import zoomout_refine
 
 
 @DENSIFIER_REGISTRY.register()
 class FunctionalMapDensifier(BaseDensifier):
-    """WKS + wave-kernel-landmark functional-map densifier with Laplacian-commutativity
-    regularisation. densify() returns the hard nearest-neighbour p2p (Y vertex -> X vertex),
-    optionally ZoomOut-refined (zoomout_refine: true) starting from that readout."""
+    """Extractor-feature + wave-kernel-landmark functional-map densifier with
+    Laplacian-commutativity regularisation. densify() returns the hard nearest-neighbour p2p
+    (Y vertex -> X vertex), optionally ZoomOut-refined (zoomout_refine: true) from that readout.
+
+    Hyperparameter notes, measured on FAUST with oracle anchors (diagnostics in git history):
+      * k_fm and mu must move TOGETHER. A larger basis lets C fit errors in the sparse map, so
+        the ridge has to grow with it: at k_fm=200, mu=0.1 beats mu=1.0 on a clean map but is
+        ~60% worse once 20-40% of anchors are wrong. k_fm=200 + mu=1.0 dominates the k_fm=120
+        default at every error rate; use mu=5.0 if the sparse map is expected to be poor.
+      * n_e has NO independent effect. It reaches the solve only through
+        sigma = variance*(log-eigenvalue range)/n_e, so raising it narrows the landmark bumps.
+        Tune band width with `variance` (cliff below ~5); leave n_e alone.
+      * lm_weight is a weak knob -- flat from 0.2 to 100 -- because it equalises the two blocks'
+        TRACE while their effective ranks differ (~27 features vs ~30 landmarks).
+    """
 
     def __init__(self, opt=None):
         super().__init__(opt)
         o = self.opt
         self.k_fm = o.get('k_fm', 120)            # spectral basis size for C and the p2p readout
-        self.n_e = o.get('n_e', 100)              # global WKS energy bands
-        self.variance = o.get('variance', 7.0)    # WKS band-width factor
+        self.n_e = o.get('n_e', 100)              # landmark energy grid resolution (sets sigma)
+        self.variance = o.get('variance', 7.0)    # wave-kernel band-width factor
         self.lm_bands = o.get('lm_bands', 20)     # wave-kernel bands per landmark
-        self.lm_weight = o.get('lm_weight', 5.0)  # landmark vs global descriptor weight
-        self.mu = o.get('mu', 1e-1)               # Laplacian-commutativity weight
+        self.lm_weight = o.get('lm_weight', 5.0)  # landmark vs feature block trace weight
+        self.mu = o.get('mu', 1e-1)               # Laplacian-commutativity weight (scale with k_fm)
         self.chunk = o.get('chunk', 512)          # Y rows per NN block (memory bound)
         self.eps = o.get('eps', 1e-8)
         # optional ZoomOut post-refinement of the one-shot p2p readout (shared spectral_refine).
@@ -64,30 +76,29 @@ class FunctionalMapDensifier(BaseDensifier):
 
     def _descriptors(self, ctx, dev):
         """Build the stacked spectral descriptor matrices A (k x D) on X and B (k x D) on Y from
-        the dense WKS field and the wave-kernel landmark bumps, plus the truncated basis/spectra
-        used by the solve and readout."""
+        the dense extractor features and the wave-kernel landmark bumps, plus the truncated
+        basis/spectra used by the solve and readout."""
         ex, ey = ctx.evecs_x.to(dev).float(), ctx.evecs_y.to(dev).float()   # (Vx,K),(Vy,K)
         vx, vy = ctx.evals_x.to(dev).float(), ctx.evals_y.to(dev).float()   # (K,),(K,)
         mx, my = ctx.mass_x.to(dev).float(), ctx.mass_y.to(dev).float()     # (Vx,),(Vy,)
         k = min(self.k_fm, ex.shape[1], ey.shape[1])
 
+        # shared energy grid for the landmark bumps: one grid spanning BOTH spectra so band b
+        # means the same energy on each shape. Only `sigma` and the subsampled `lm_e` below are
+        # used -- n_e itself acts solely by setting sigma (see class docstring).
         energies, sigma = shared_wks_grid(vx, vy, self.n_e, self.variance, self.eps)
 
         exk, eyk = ex[:, :k], ey[:, :k]
         etx = (exk * mx[:, None]).T                                         # (k, Vx) = Phi^T M
         ety = (eyk * my[:, None]).T
 
-        # global descriptor block, projected into the truncated basis (etx @ field -> (k, D)):
-        # trained DiffusionNet features when feat_source=diffnet supplies them (filled by the
-        # model), else fall back to the network-free WKS signature.
-        use_feat = (self.feat_source in ('gcn', 'diffnet')
-                    and ctx.feat_x is not None and ctx.feat_y is not None)
-        if use_feat:
-            Gx = ctx.feat_x.to(dev).float()                                # (Vx, d)
-            Gy = ctx.feat_y.to(dev).float()
-        else:
-            Gx = wks_on_grid(vx, ex, energies, sigma, self.eps)            # (Vx, n_e)
-            Gy = wks_on_grid(vy, ey, energies, sigma, self.eps)
+        # global descriptor block, projected into the truncated basis (etx @ field -> (k, D)).
+        # The model runs its extractor densely and fills ctx.feat_x/feat_y before densify().
+        assert ctx.feat_x is not None and ctx.feat_y is not None, \
+            ("FunctionalMapDensifier needs dense extractor features on ctx.feat_x/feat_y -- set "
+             "densifier.feat_source: diffnet and give the model a DiffusionNet extractor")
+        Gx = ctx.feat_x.to(dev).float()                                    # (Vx, d)
+        Gy = ctx.feat_y.to(dev).float()
         Ax_g, Ay_g = etx @ Gx, ety @ Gy                                    # (k, D) each
         Ax_g, Ay_g = self._normalise_pair(Ax_g, Ay_g, self.eps)
         # divide each block by sqrt(#columns) so its trace contribution is 1 regardless of how
