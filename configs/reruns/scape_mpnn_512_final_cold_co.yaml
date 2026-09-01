@@ -1,0 +1,97 @@
+name: scape_mpnn_512_final_cold_co
+group: reruns                 # experiments/<group>/<name>/
+model_type: MPNNDiffusionModel
+is_train: true
+
+path:
+  resume: false
+
+datasets:
+  train: {name: Scape_r, type: SparsePairScapeDataset, phase: train, n_sparse: 512, exclude_self: true, fps_metric: geodesic, ret_evecs: true, num_evecs: 128}
+  val:   {name: Scape_r, type: SparsePairScapeDataset, phase: test,  n_sparse: 512, exclude_self: true, fps_metric: geodesic, ret_evecs: true, num_evecs: 128}
+  test:  {name: Scape_r, type: SparsePairScapeDataset, phase: test,  n_sparse: 512, exclude_self: true, ret_evecs: true, num_evecs: 200, fps_metric: geodesic}
+
+networks:
+  extractor:
+    type: DiffusionNetExtractor
+    out_dim: 128
+    input_type: hks
+    hidden: 128
+    n_block: 4
+    k_eig: 128
+    hks_count: 16
+  denoiser:
+    type: MPNNMatrixDenoiser
+    feat_dim: 128
+    dim: 128
+    depth: 6
+    heads: 4              # cross-attention heads (used only when cross_type=attn)
+    cross_type: mpnn      # candidate-graph GNN cross stage (feature-kNN ∪ state top-k)
+    k_intra: 12           # geodesic-kNN degree for the intra message-passing graph
+    k_feat: 10            # static feature-kNN candidates per receiver (cross)
+    k_state: 10           # dynamic state-top-k candidates per receiver (cross)
+    n_rbf: 16             # RBF basis size (distance + state-value filters)
+    rbf_max: 3.0          # upper end of the normalised-distance RBF grid
+    inner_iters: 4        # soft-Sinkhorn sweeps in the per-block re-gauge
+    dropout: 0.0
+    # no bp: block -> BP disabled
+
+diffusion:
+  eta: 0.0
+  proj_iters: 6
+  schedule_s: 0.008
+  logsnr_shift: 0.0
+  feature_dropout: 0.0   # OFF for this variant
+  t_sampler:
+    t_min_drop: 0.35
+    t_min_feat: 0.35
+    uniform_frac: 0.15
+  target:
+    type: gaussian       # REQUIRED for independent-FPS training (asserted in _target)
+    sigma: 0.03
+    cutoff: 0.09
+    floor: 2.0e-4
+    doubly_stochastic: true   # entropic-OT (Sinkhorn) target vs row-stochastic baseline
+    ds_iters: 20              # Sinkhorn iterations for the target normalisation
+  sample_steps: 50
+  final_iters: 20
+
+bp:                    # BP post-process; omit the block entirely to disable
+  beta: 0.5
+  sigma: 0.02
+  g: 2.0
+  tau: 1.0
+  delta: 4.0
+  s: -2.0
+  sweeps: 40
+  k_cand: 10
+  k_graph: 12
+
+densifier:
+  type: FunctionalMapDensifier
+  feat_source: diffnet
+  k_fm: 200
+  n_e: 100
+  lm_bands: 20
+  lm_weight: 5.0
+  mu: 1.0
+  variance: 7.0
+
+eval:
+  sparse: true
+  dense: false
+
+train:
+  total_epochs: 35
+  log_freq: 40
+  independent_train_prob: 1.0   # (A) full honest independent-FPS training; 0 = bijective (default)
+  optims:
+    extractor: {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+    denoiser:  {type: AdamW, lr: 1e-3, weight_decay: 1e-4}
+  schedulers:
+    extractor: {type: CosineAnnealingLR, eta_min: 1e-4}
+    denoiser:  {type: CosineAnnealingLR, eta_min: 1e-4}
+
+val:
+  subset: 20
+  independent_fps: true    # validate in the inference regime (dense MGE via the densifier)
