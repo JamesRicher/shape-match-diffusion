@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from datasets import build_dataset
 from models import build_model
 from models.base_model import to_numpy
-from train import _single_collate, _RestoringLoader, autofill_feat_dim
+from train import _single_collate, _RestoringLoader, autofill_feat_dim, seed_everything
 from utils.data_utils import sqrt_surface_area
 from utils.logger import get_root_logger
 from utils.options import _YamlLoader, load_yaml, resolve_experiment_paths
@@ -30,6 +30,10 @@ def build_opt(args):
         apply_override(opt, override)
     if args.device is not None:
         opt['device'] = args.device
+    if args.seed is not None:
+        opt['seed'] = args.seed
+    if args.save_maps:
+        opt.setdefault('eval', {})['save_maps'] = True
 
     opt['is_train'] = False  # no optimizers/schedulers/losses for a pure eval pass
 
@@ -120,12 +124,21 @@ def parse_args():
                              '(default: the test dataset name); lets one model be '
                              'evaluated on several datasets without overwriting')
     parser.add_argument('--device', default=None, help="'cuda' / 'cpu'; auto-detected when omitted")
+    parser.add_argument('--seed', type=int, default=None,
+                        help='global RNG seed (overrides config "seed"), making the run '
+                             'reproducible: the DDIM prior u_T is the only live randomness at '
+                             'eval. Omitted and unset in the config => unseeded, as before')
     parser.add_argument('--set', action='append', metavar='KEY=VALUE', default=None,
                         help='override a config value by dotted key, repeatable '
                              '(e.g. --set densifier.k_fm=160); pair with --eval_tag to avoid '
                              'overwriting the default run')
     parser.add_argument('--no_sparse', action='store_true',
                         help='skip the [2/2] bijective sparse-stats pass (dense MGE only)')
+    parser.add_argument('--save_maps', action='store_true',
+                        help="dump every pair's sparse + dense predicted map and per-pair MGE to "
+                             'results/<tag>/maps.npz, so figures can be re-rendered offline from '
+                             'the exact maps behind the reported numbers (pair i is selected by '
+                             'position: np.argsort(mge) gives best..worst). Off by default')
     parser.add_argument('--num_workers', type=int, default=0, help='dataloader workers')
     parser.add_argument('--num_qual', type=int, default=10,
                         help='number of random test pairs to render texture-transfer '
@@ -192,6 +205,41 @@ def generate_qualitative(model, test_set, out_dir, num_pairs=10, seed=0):
 
 
 # --------------------------------------------------------------------------- #
+# BP post-process
+# --------------------------------------------------------------------------- #
+BP_DEFAULTS = dict(beta=0.5, sigma=0.02, g=4.0, tau=1.0, delta=4.0, s=-4.0,
+                   sweeps=10, k_cand=10, k_graph=12)
+
+
+def attach_bp_postprocess(model, opt):
+    """Wrap the model's sparse map in a BP refinement pass when the config has a ``bp`` block.
+
+    BP is part of the method, not a diagnostic, so it must sit where EVERY reporting path sees
+    it: ``attach_bp`` replaces ``validate_single``, which is the single point the sparse stats,
+    the densifier, the PCK curves and the qualitative figures all draw the sparse map from.
+
+    The block only needs the keys that differ from BP_DEFAULTS, so an EMPTY ``bp: {}`` runs BP
+    at the defaults. Off is signalled by absence or by an explicit ``bp: null`` -- note that a
+    bare ``bp:`` with nothing after it is YAML null, i.e. OFF; write ``bp: {}`` to mean "on,
+    defaults". So one config gives both rows via ``--set bp=null``. Returns the resolved params
+    for the stats file, or None when off."""
+    block = opt.get('bp')
+    if block is None:
+        return None
+    # local import: diagnostics.bp_postprocess_eval imports apply_override from this module,
+    # so a top-level import here would be circular.
+    from diagnostics.bp_postprocess_eval import attach_bp
+    unknown = set(block) - set(BP_DEFAULTS)
+    if unknown:
+        raise ValueError(f"unknown key(s) in opt['bp']: {sorted(unknown)}; "
+                         f"expected a subset of {sorted(BP_DEFAULTS)}")
+    params = {**BP_DEFAULTS, **block}
+    attach_bp(model, params)                 # restore() discarded: eval loads a fresh model
+    get_root_logger().info(f'BP post-process ENABLED: {params}')
+    return params
+
+
+# --------------------------------------------------------------------------- #
 # evaluation
 # --------------------------------------------------------------------------- #
 def evaluate(opt, ckpt, args):
@@ -221,6 +269,8 @@ def evaluate(opt, ckpt, args):
     # the constructor loads `ckpt` (net-only, since is_train is False)
     model = build_model(opt)
     sparse_matcher = sparse_matcher and hasattr(model, 'report_sparse')
+
+    bp_params = attach_bp_postprocess(model, opt)
 
     # Results are owned by the trained model's own experiment dir (results_root_for), keyed by the
     # test dataset (eval_tag). So evaluating THIS model on another dataset adds a sibling subdir,
@@ -280,6 +330,8 @@ def evaluate(opt, ckpt, args):
         'checkpoint': ckpt,
         'dataset': opt['datasets']['test'],
         'num_test_pairs': len(test_set),
+        'bp': bp_params,               # None when the BP post-process is off
+        'seed': opt.get('seed'),       # None when the run was left unseeded
         **metrics,
     }
     with open(os.path.join(results_dir, 'stats.json'), 'w') as f:
@@ -294,6 +346,16 @@ def main():
     args = parse_args()
     torch.set_float32_matmul_precision('high')   # TF32 matmuls (see train.py note); no-op pre-Ampere
     opt, ckpt = build_opt(args)
+    # Seeded eval reproduces a run exactly. The only live randomness in an eval pass is the
+    # DDIM prior u_T (and the eta>0 noise injections) -- FPS starts are index-derived at test
+    # time and rot_aug is gated on self.training -- so one global seed pins the maps. It also
+    # PAIRS runs that consume the RNG identically: BP draws no random numbers, so a with-BP
+    # and a without-BP run at the same seed refine the same samples. Changing sample_steps or
+    # eta changes RNG consumption, so those arms are NOT paired with each other.
+    seed = opt.get('seed')
+    if seed is not None:
+        seed_everything(int(seed))
+        get_root_logger().info(f'Global seed set to {seed}.')
     evaluate(opt, ckpt, args)
 
 

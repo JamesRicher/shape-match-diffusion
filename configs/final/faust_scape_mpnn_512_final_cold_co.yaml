@@ -60,14 +60,25 @@ diffusion:
   sample_steps: 50
   final_iters: 20
 
+bp:                    # BP post-process; omit the block entirely to disable
+  beta: 0.5
+  sigma: 0.02
+  g: 2.0
+  tau: 1.0
+  delta: 4.0
+  s: -2.0
+  sweeps: 40
+  k_cand: 10
+  k_graph: 12
+
 densifier:
   type: FunctionalMapDensifier
   feat_source: diffnet
-  k_fm: 120
+  k_fm: 200
   n_e: 100
   lm_bands: 20
   lm_weight: 5.0
-  mu: 0.1
+  mu: 1.0
   variance: 7.0
 
 eval:

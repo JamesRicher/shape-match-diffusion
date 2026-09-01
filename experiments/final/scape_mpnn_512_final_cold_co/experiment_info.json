@@ -1,5 +1,5 @@
 {
-  "name": "scape_mpnn_512_final",
+  "name": "scape_mpnn_512_final_cold_co",
   "model_type": null,
   "timestamp": "2026-08-30T08:53:18+00:00",
   "git_commit": "eb43ceb",
@@ -154,5 +154,6 @@
       "subset": 20,
       "independent_fps": true
     }
-  }
+  },
+  "name_corrected_note": "trained as scape_mpnn_512_final by scape_mpnn_512_final_cold_co.yaml, whose name: field was wrong; relabelled 2026-09-01. The absolute paths recorded under config.path are the original training paths."
 }

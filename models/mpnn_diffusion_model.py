@@ -71,6 +71,10 @@ class MPNNDiffusionModel(BaseModel):
         ev = opt.get('eval', {})
         self.report_sparse = ev.get('sparse', True)
         self.report_dense = ev.get('dense', self.densifier is not None)
+        # Dump every pair's predicted maps + per-pair MGE to <out_dir>/maps.npz. Off by default:
+        # it is an eval-time artefact (evaluate.py --save_maps), not something the training-loop
+        # validation should be writing every epoch.
+        self.save_maps = ev.get('save_maps', False)
         # PCK-curve reporting range.
         self.pck_max = ev.get('pck_max', 0.10)  # geodesic-error upper bound (sqrt-area units)
         self.pck_n = ev.get('pck_n', 100)       # number of thresholds in [0, pck_max]
@@ -394,6 +398,36 @@ class MPNNDiffusionModel(BaseModel):
     # ------------------------------------------------------------------ #
     # validation (sparse dev metric and/or dense whole-shape MGE)
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _save_maps(out_dir, names, mge, sparse, idx_x, idx_y, dense):
+        """Write every pair's predicted maps + per-pair MGE to <out_dir>/maps.npz.
+
+        Layout -- pairs are addressed by POSITION, so selecting figures is an argsort:
+
+            names   (N,)      '<shape_x>-<shape_y>', in dataloader order
+            mge     (N,)      per-pair mean geodesic error; np.argsort(mge) -> best..worst
+            sparse  (N, n)    the n_sparse anchor map Y->X that the densifier consumed
+            idx_x   (N, n)    which X vertices those anchors are
+            idx_y   (N, n)    which Y vertices the queries are
+            dense_i (V_y,)    pair i's whole-shape map Y->X; V_y varies, hence one key each
+
+        Index keys (not pair names) keep the ragged dense members free of any character or
+        collision issues in the zip, and npz members decompress lazily, so rendering three
+        pairs out of a 1200-pair DT4D file never touches the rest. int32 throughout: zlib
+        already recovers ~2.3x, which int16 would only improve by ~14% while risking silent
+        overflow on any mesh above 32767 vertices.
+        """
+        arrays = {'names': np.array(names), 'mge': np.asarray(mge, dtype=np.float32),
+                  'sparse': np.stack(sparse).astype(np.int32),
+                  'idx_x': np.stack(idx_x).astype(np.int32),
+                  'idx_y': np.stack(idx_y).astype(np.int32)}
+        arrays.update({f'dense_{i:05d}': d.astype(np.int32) for i, d in enumerate(dense)})
+        os.makedirs(out_dir, exist_ok=True)
+        path = os.path.join(out_dir, 'maps.npz')
+        np.savez_compressed(path, **arrays)
+        get_root_logger().info(
+            f'Wrote {len(names)} maps -> {path} ({os.path.getsize(path) / 1e6:.1f} MB)')
+
     @torch.no_grad()
     def validation(self, dataloader, out_dir=None):
         """Report the sparse FPS-point geodesic error + accuracy (opt['eval']['sparse']) and/or
@@ -407,6 +441,11 @@ class MPNNDiffusionModel(BaseModel):
         self.eval()
         logger = get_root_logger()
         errs, accs, dense_errs, first_data = [], [], [], None
+        # Maps come from the DENSE pass only: it is the honest independent-FPS regime, and both
+        # the sparse map and the dense map it densifies to are in hand there, so the two are
+        # paired by construction. Needs out_dir, which the bijective sparse pass is not given.
+        keep = bool(out_dir) and self.report_dense and self.save_maps
+        m_names, m_mge, m_sparse, m_ix, m_iy, m_dense = [], [], [], [], [], []
         pbar = tqdm(dataloader, desc='diffusion eval')
         for data in pbar:
             if first_data is None:
@@ -429,7 +468,18 @@ class MPNNDiffusionModel(BaseModel):
                 dense_errs.append(calculate_geodesic_error(
                     dist_x, corr_x, corr_y, dense_p2p.cpu().numpy(), return_mean=False))
                 post['dense'] = float(np.concatenate(dense_errs).mean())
+                if keep:
+                    m_names.append(f"{data['first'].get('name', '?')}-"
+                                   f"{data['second'].get('name', '?')}")
+                    m_mge.append(float(dense_errs[-1].mean()))     # this pair's MGE
+                    m_sparse.append(p2p.cpu().numpy())
+                    m_ix.append(data['first']['sparse']['idx'].cpu().numpy())
+                    m_iy.append(data['second']['sparse']['idx'].cpu().numpy())
+                    m_dense.append(dense_p2p.cpu().numpy())
             pbar.set_postfix(**post)                               # running averages, not a spinner
+
+        if keep and m_names:
+            self._save_maps(out_dir, m_names, m_mge, m_sparse, m_ix, m_iy, m_dense)
 
         result = {}
         msg = []
