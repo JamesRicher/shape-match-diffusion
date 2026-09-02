@@ -1,0 +1,27 @@
+{
+  "name": "faust_scape_mpnn_512_final",
+  "eval_tag": "Faust_r",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/reruns/faust_scape_mpnn_512_final/models/final.pth",
+  "dataset": {
+    "name": "Faust_r",
+    "type": "SparsePairFaustDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "geodesic"
+  },
+  "num_test_pairs": 380,
+  "bp": null,
+  "seed": null,
+  "dense_error": 0.015118887647986412,
+  "auc": 0.8559086018075492,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.0024861672427505255,
+  "sparse_acc": 0.974352384868421,
+  "sparse_auc": 0.9864588265467171,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}
