@@ -1,7 +1,7 @@
 {
   "name": "faust_scape_mpnn_512_final_cold_co",
   "eval_tag": "scape_seed0",
-  "checkpoint": "experiments/final/faust_scape_mpnn_512_final_cold_co/models/final.pth",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/faust_scape_mpnn_512_final_cold_co/models/final.pth",
   "dataset": {
     "name": "Scape_r",
     "type": "SparsePairScapeDataset",
@@ -25,13 +25,13 @@
     "k_graph": 12
   },
   "seed": 0,
-  "dense_error": 0.03727593272924423,
-  "auc": 0.7724727804359384,
+  "dense_error": 0.019665757194161415,
+  "auc": 0.8034741972355129,
   "pck_max": 0.1,
   "pck_n": 100,
-  "sparse_avg_error": 0.020065560936927795,
-  "sparse_acc": 0.9109220805921052,
-  "sparse_auc": 0.9367610625166135,
+  "sparse_avg_error": 0.0030930819921195507,
+  "sparse_acc": 0.9444901315789473,
+  "sparse_auc": 0.9711615798195774,
   "sparse_pck_max": 0.1,
   "sparse_pck_n": 100
 }
