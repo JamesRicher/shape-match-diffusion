@@ -35,20 +35,40 @@ DEFAULT_TEXTURE_FILE = os.path.join(REPO_ROOT, 'texture.png')
 # --------------------------------------------------------------------------- #
 # UV synthesis + transfer
 # --------------------------------------------------------------------------- #
-def generate_tex_coords(verts):
-    """Synthesize per-vertex UVs by projecting onto the two highest-variance axes
-    (ULRSSM's generate_tex_coords), min-max normalized to [0, 1]^2.
+def generate_tex_coords(verts, axes=None, preserve_aspect=False, scale=1.0):
+    """Synthesize per-vertex UVs by planar-projecting the shape, normalized into [0, 1]^2.
+
+    The default picks the two highest-variance axes (ULRSSM's generate_tex_coords). That is
+    a reasonable guess for an arbitrary shape but not for an upright human: height dominates,
+    and the runner-up is usually depth rather than width, so the projection lands on the
+    SAGITTAL plane and the texture reads as a side view. Pass axes='xy' for a front-on
+    projection of a y-up human.
 
     Args:
         verts (np.ndarray): vertex positions, [V, 3].
+        axes (str, None): two of 'xyz' naming the (u, v) axes, e.g. 'xy'. None = variance order.
+        preserve_aspect (bool): scale both axes by one factor so texture cells stay square
+            (DSMK's variant). Default False stretches each axis to fill [0, 1], which is
+            ULRSSM's behaviour but squashes the cells on a tall, narrow shape.
+        scale (float): multiply the normalized UVs, tiling the texture (the renderer must
+            wrap, which is the default). Pairs with preserve_aspect: keeping cells square
+            leaves the short axis covering only a fraction of one tile, so the cells come
+            out coarse; scale restores their density without re-introducing the stretch.
     Returns:
-        uv (np.ndarray): texture coordinates, [V, 2].
+        uv (np.ndarray): texture coordinates, [V, 2]; in [0, 1]^2 only when scale == 1.
     """
-    ind = np.argsort(np.std(verts, axis=0))[::-1]
-    vt = np.stack([verts[:, ind[1]], verts[:, ind[0]]], axis=-1)
+    if axes is None:
+        ind = np.argsort(np.std(verts, axis=0))[::-1]
+        cols = (ind[1], ind[0])                       # (u, v) = (2nd, 1st) by variance
+    else:
+        if len(axes) != 2 or not set(axes) <= set('xyz') or axes[0] == axes[1]:
+            raise ValueError(f"axes must be two distinct letters from 'xyz', got {axes!r}")
+        cols = tuple('xyz'.index(a) for a in axes)
+    vt = np.stack([verts[:, cols[0]], verts[:, cols[1]]], axis=-1)
     vt = vt - vt.min(axis=0, keepdims=True)
-    vt = vt / (vt.max(axis=0, keepdims=True) + 1e-12)
-    return vt
+    if preserve_aspect:
+        return scale * vt / (vt.max() + 1e-12)
+    return scale * vt / (vt.max(axis=0, keepdims=True) + 1e-12)
 
 
 def hard_uv_transfer(uv_x, p2p_yx):
@@ -85,6 +105,45 @@ def smoothed_uv_transfer(uv_x, p2p_yx, evecs_x, evecs_y, evecs_trans_x, evecs_tr
     Cxy = evecs_trans_y @ evecs_x[p2p_yx]                # [K, K]
     uv_y = evecs_y @ (Cxy @ (evecs_trans_x @ uv_x))      # Pyx @ uv_x, factored
     return np.clip(uv_y, 0.0, 1.0)
+
+
+def write_obj_with_texture(file_name, verts, faces, uv, texture_name='texture.png'):
+    """Write a UV-mapped .obj plus its sibling .mtl, referencing texture_name.
+
+    ULRSSM's write_obj_with_texture: the renderer looks the texture up per pixel through
+    these UVs, so a texture-transfer pair is two objs sharing one image -- the source with
+    its own UVs, the target with those UVs carried through the map. UVs are per vertex
+    (face lines are 'f v/vt' with vt == v), which loses nothing here: the transferred uv
+    array is per vertex, so per-corner UVs would just repeat it.
+
+    Args:
+        file_name (str): output .obj path; the .mtl is written alongside it.
+        verts (np.ndarray): vertices, [V, 3].
+        faces (np.ndarray): faces, [F, 3], 0-indexed.
+        uv (np.ndarray): texture coordinates in [0, 1]^2, [V, 2].
+        texture_name (str): map_Kd value, resolved relative to the .mtl.
+    """
+    assert verts.shape[-1] == 3, f'bad vertex shape {verts.shape}'
+    assert faces.shape[-1] == 3, f'bad face shape {faces.shape}'
+    assert uv.shape == (len(verts), 2), f'uv {uv.shape} does not match {len(verts)} vertices'
+    stem = os.path.splitext(os.path.basename(file_name))[0]
+    mtl_name = 'material_0'
+
+    lines = [f'mtllib {stem}.mtl', f'g {stem}']
+    lines += [f'v {x:.6f} {y:.6f} {z:.6f}' for x, y, z in verts]
+    lines += [f'vt {u:.6f} {v:.6f}' for u, v in uv]
+    lines.append(f'usemtl {mtl_name}')
+    lines += [f'f {a}/{a} {b}/{b} {c}/{c}' for a, b, c in (faces.astype(np.int64) + 1)]
+    with open(file_name, 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+
+    with open(os.path.splitext(file_name)[0] + '.mtl', 'w') as f:
+        f.write(f'newmtl {mtl_name}\n'
+                'Ka  0.200000 0.200000 0.200000\n'
+                'Kd  1.000000 1.000000 1.000000\n'
+                'Ks  1.000000 1.000000 1.000000\n'
+                'Tr  1\nNs  0\nillum 2\n'
+                f'map_Kd {texture_name}\n')
 
 
 # --------------------------------------------------------------------------- #

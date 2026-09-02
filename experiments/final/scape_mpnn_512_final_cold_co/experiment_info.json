@@ -1,8 +1,8 @@
 {
   "name": "scape_mpnn_512_final_cold_co",
   "model_type": null,
-  "timestamp": "2026-08-30T08:53:18+00:00",
-  "git_commit": "eb43ceb",
+  "timestamp": "2026-09-01T23:49:51+00:00",
+  "git_commit": "33da58a",
   "device": "cuda",
   "networks": {
     "extractor": {
@@ -17,14 +17,14 @@
     }
   },
   "config": {
-    "name": "scape_mpnn_512_final",
-    "group": "final",
+    "name": "scape_mpnn_512_final_cold_co",
+    "group": "reruns",
     "is_train": true,
     "path": {
       "resume": false,
-      "experiment_root": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/scape_mpnn_512_final",
-      "models": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/scape_mpnn_512_final/models",
-      "results": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/scape_mpnn_512_final/results",
+      "experiment_root": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/reruns/scape_mpnn_512_final_cold_co",
+      "models": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/reruns/scape_mpnn_512_final_cold_co/models",
+      "results": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/reruns/scape_mpnn_512_final_cold_co/results",
       "resume_state": null
     },
     "datasets": {
@@ -107,14 +107,25 @@
       "sample_steps": 50,
       "final_iters": 20
     },
+    "bp": {
+      "beta": 0.5,
+      "sigma": 0.02,
+      "g": 2.0,
+      "tau": 1.0,
+      "delta": 4.0,
+      "s": -2.0,
+      "sweeps": 40,
+      "k_cand": 10,
+      "k_graph": 12
+    },
     "densifier": {
       "type": "FunctionalMapDensifier",
       "feat_source": "diffnet",
-      "k_fm": 120,
+      "k_fm": 200,
       "n_e": 100,
       "lm_bands": 20,
       "lm_weight": 5.0,
-      "mu": 0.1,
+      "mu": 1.0,
       "variance": 7.0
     },
     "eval": {
@@ -122,7 +133,7 @@
       "dense": true
     },
     "train": {
-      "total_epochs": 55,
+      "total_epochs": 35,
       "log_freq": 40,
       "independent_train_prob": 1.0,
       "optims": {
@@ -141,12 +152,12 @@
         "extractor": {
           "type": "CosineAnnealingLR",
           "eta_min": 0.0001,
-          "T_max": 55
+          "T_max": 35
         },
         "denoiser": {
           "type": "CosineAnnealingLR",
           "eta_min": 0.0001,
-          "T_max": 55
+          "T_max": 35
         }
       }
     },
@@ -154,6 +165,5 @@
       "subset": 20,
       "independent_fps": true
     }
-  },
-  "name_corrected_note": "trained as scape_mpnn_512_final by scape_mpnn_512_final_cold_co.yaml, whose name: field was wrong; relabelled 2026-09-01. The absolute paths recorded under config.path are the original training paths."
+  }
 }
