@@ -72,7 +72,7 @@ from metrics import build_metric
 from models import build_model
 from models.base_model import to_numpy
 from evaluate import apply_override
-from train import autofill_feat_dim
+from train import autofill_feat_dim, seed_everything
 from utils.options import load_yaml, resolve_experiment_paths
 from diagnostics.sparse_independent_error import _sparse_independent_error
 
@@ -441,6 +441,11 @@ def main():
         degrade_mode, degrade_strength = 'blur', args.feature_blur
     else:
         degrade_mode, degrade_strength = None, 0.0
+
+    # match evaluate.py's numerics exactly, so an arm here is comparable to a reported eval:
+    # TF32 matmuls change the extractor's features enough to flip a few assignments otherwise.
+    torch.set_float32_matmul_precision('high')
+    seed_everything(args.seed)
 
     s = run(args.config, args.checkpoint, args.device, args.fps_metric,
             args.num_pairs, args.seed, not args.no_diffusion, not args.no_hungarian,

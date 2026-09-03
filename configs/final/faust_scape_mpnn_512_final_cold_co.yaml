@@ -86,7 +86,7 @@ eval:
   dense: false
 
 train:
-  total_epochs: 20
+  total_epochs: 15
   log_freq: 40
   independent_train_prob: 1.0   # (A) full honest independent-FPS training; 0 = bijective (default)
   optims:
