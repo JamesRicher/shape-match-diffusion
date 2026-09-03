@@ -1,0 +1,27 @@
+{
+  "name": "scape_mpnn_512_final_cold_co",
+  "eval_tag": "scape_FINAL_seed0_self_nobp",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/scape_mpnn_512_final_cold_co/models/final.pth",
+  "dataset": {
+    "name": "Scape_r",
+    "type": "SparsePairScapeDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": false,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "geodesic"
+  },
+  "num_test_pairs": 400,
+  "bp": null,
+  "seed": 0,
+  "dense_error": 0.018018562346696854,
+  "auc": 0.8199040227272727,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.00892241857945919,
+  "sparse_acc": 0.86630859375,
+  "sparse_auc": 0.9303216737689394,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}

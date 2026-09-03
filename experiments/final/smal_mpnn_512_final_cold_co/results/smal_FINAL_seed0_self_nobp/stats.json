@@ -1,0 +1,28 @@
+{
+  "name": "smal_mpnn_512_final_cold_co",
+  "eval_tag": "smal_FINAL_seed0_self_nobp",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/smal_mpnn_512_final_cold_co/models/final.pth",
+  "dataset": {
+    "name": "Smal_r",
+    "type": "SparsePairSmalDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": false,
+    "category": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "geodesic"
+  },
+  "num_test_pairs": 400,
+  "bp": null,
+  "seed": 0,
+  "dense_error": 0.04334438219666481,
+  "auc": 0.6728348378358021,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.06078052893280983,
+  "sparse_acc": 0.4965869140625,
+  "sparse_auc": 0.6659775735874368,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}

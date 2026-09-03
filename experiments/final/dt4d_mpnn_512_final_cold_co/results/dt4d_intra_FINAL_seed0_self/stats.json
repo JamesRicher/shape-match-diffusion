@@ -1,0 +1,38 @@
+{
+  "name": "dt4d_mpnn_512_final_cold_co",
+  "eval_tag": "dt4d_intra_FINAL_seed0_self",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/dt4d_mpnn_512_final_cold_co/models/final.pth",
+  "dataset": {
+    "name": "Dt4d_r",
+    "type": "SparsePairDT4DDataset",
+    "phase": "test",
+    "inter_class": false,
+    "n_sparse": 512,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "geodesic",
+    "exclude_self": false
+  },
+  "num_test_pairs": 825,
+  "bp": {
+    "beta": 0.5,
+    "sigma": 0.02,
+    "g": 2.0,
+    "tau": 1.0,
+    "delta": 4.0,
+    "s": -2.0,
+    "sweeps": 40,
+    "k_cand": 10,
+    "k_graph": 12
+  },
+  "seed": 0,
+  "dense_error": 0.009223037399351597,
+  "auc": 0.9091645619944416,
+  "pck_max": 0.1,
+  "pck_n": 100,
+  "sparse_avg_error": 0.0007390257669612765,
+  "sparse_acc": 0.99125,
+  "sparse_auc": 0.9944512119299052,
+  "sparse_pck_max": 0.1,
+  "sparse_pck_n": 100
+}
