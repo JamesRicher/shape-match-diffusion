@@ -1,0 +1,38 @@
+{
+  "name": "faust_mpnn_512_final_cold_co",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/faust_mpnn_512_final_cold_co/models/final.pth",
+  "n_pairs": 407,
+  "fps_metric": "geodesic",
+  "feat_source": "diffnet",
+  "overrides": [
+    "bp=null",
+    "datasets.test.name=Shrec19_r",
+    "datasets.test.type=SparsePairShrec19Dataset"
+  ],
+  "degradation": null,
+  "nn_baseline": {
+    "dense_MGE": 0.07517015933990479,
+    "median": 0.030103757977485657,
+    "p90": 0.08322034031152725,
+    "gross_gt_0.1": 0.0751189718264891,
+    "sparse_independent": {
+      "sparse_MGE": 0.13022375106811523,
+      "median": 0.04243948310613632,
+      "p90": 0.27880463004112244,
+      "gross_gt_0.1": 0.14313958845208846
+    }
+  },
+  "hungarian": {
+    "dense_MGE": 0.07499489933252335,
+    "median": 0.03071165829896927,
+    "p90": 0.08267498761415482,
+    "gross_gt_0.1": 0.0726247669210148,
+    "sparse_independent": {
+      "sparse_MGE": 0.14736627042293549,
+      "median": 0.044202160090208054,
+      "p90": 0.4532766342163086,
+      "gross_gt_0.1": 0.16621237714987716
+    }
+  },
+  "out_dir": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/faust_mpnn_512_final_cold_co/results/benchmarks/faust_mpnn_512_final_cold_co"
+}

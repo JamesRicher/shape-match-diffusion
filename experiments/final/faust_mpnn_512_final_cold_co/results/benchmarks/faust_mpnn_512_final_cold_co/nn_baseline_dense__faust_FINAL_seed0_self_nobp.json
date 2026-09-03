@@ -1,0 +1,53 @@
+{
+  "name": "faust_mpnn_512_final_cold_co",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/faust_mpnn_512_final_cold_co/models/final.pth",
+  "n_pairs": 400,
+  "fps_metric": "geodesic",
+  "feat_source": "diffnet",
+  "overrides": [
+    "bp=null",
+    "datasets.test.name=Faust_r",
+    "datasets.test.type=SparsePairFaustDataset",
+    "datasets.test.exclude_self=false"
+  ],
+  "degradation": null,
+  "nn_baseline": {
+    "dense_MGE": 0.02326316386461258,
+    "median": 0.014645596966147423,
+    "p90": 0.03480863198637962,
+    "gross_gt_0.1": 0.0102575,
+    "sparse_independent": {
+      "sparse_MGE": 0.07575210928916931,
+      "median": 0.023701436817646027,
+      "p90": 0.05617165192961693,
+      "gross_gt_0.1": 0.05275390625
+    }
+  },
+  "hungarian": {
+    "dense_MGE": 0.02651132456958294,
+    "median": 0.015261806547641754,
+    "p90": 0.035445649176836014,
+    "gross_gt_0.1": 0.012432,
+    "sparse_independent": {
+      "sparse_MGE": 0.09072133898735046,
+      "median": 0.025595184415578842,
+      "p90": 0.06890462338924408,
+      "gross_gt_0.1": 0.07642578125
+    }
+  },
+  "diffusion": {
+    "dense_MGE": 0.013949204236268997,
+    "median": 0.013301009312272072,
+    "p90": 0.027646679431200027,
+    "gross_gt_0.1": 0.0016675,
+    "sparse_independent": {
+      "sparse_MGE": 0.04738083854317665,
+      "median": 0.02301708422601223,
+      "p90": 0.05070103704929352,
+      "gross_gt_0.1": 0.041455078125
+    }
+  },
+  "delta_MGE_nn_minus_diffusion": 0.009313959628343582,
+  "delta_MGE_hungarian_minus_diffusion": 0.012562120333313942,
+  "out_dir": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/faust_mpnn_512_final_cold_co/results/benchmarks/faust_mpnn_512_final_cold_co"
+}

@@ -1,0 +1,38 @@
+{
+  "name": "dt4d_mpnn_512_final_cold_co",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/dt4d_mpnn_512_final_cold_co/models/final.pth",
+  "n_pairs": 825,
+  "fps_metric": "geodesic",
+  "feat_source": "diffnet",
+  "overrides": [
+    "bp=null",
+    "datasets.test.inter_class=false",
+    "datasets.test.exclude_self=false"
+  ],
+  "degradation": null,
+  "nn_baseline": {
+    "dense_MGE": 0.010497020557522774,
+    "median": 0.007587424945086241,
+    "p90": 0.020855847746133804,
+    "gross_gt_0.1": 0.003044676326891078,
+    "sparse_independent": {
+      "sparse_MGE": 0.04781294986605644,
+      "median": 0.019829358905553818,
+      "p90": 0.04273444786667824,
+      "gross_gt_0.1": 0.03009469696969697
+    }
+  },
+  "hungarian": {
+    "dense_MGE": 0.012622685171663761,
+    "median": 0.008377786725759506,
+    "p90": 0.021549144759774208,
+    "gross_gt_0.1": 0.004634936758758448,
+    "sparse_independent": {
+      "sparse_MGE": 0.058387432247400284,
+      "median": 0.021512337028980255,
+      "p90": 0.049487221986055374,
+      "gross_gt_0.1": 0.04430397727272727
+    }
+  },
+  "out_dir": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/dt4d_mpnn_512_final_cold_co/results/benchmarks/dt4d_mpnn_512_final_cold_co"
+}
