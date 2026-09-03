@@ -1,0 +1,22 @@
+{
+  "name": "faust_scape_mpnn_512_final_cold_co",
+  "eval_tag": "shrec19_FINAL_seed0_self_steps1_nobp",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/faust_scape_mpnn_512_final_cold_co/models/final.pth",
+  "dataset": {
+    "name": "Shrec19_r",
+    "type": "SparsePairShrec19Dataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": true,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "geodesic"
+  },
+  "num_test_pairs": 407,
+  "bp": null,
+  "seed": 0,
+  "dense_error": 0.03521326556801796,
+  "auc": 0.6976979802426077,
+  "pck_max": 0.1,
+  "pck_n": 100
+}
