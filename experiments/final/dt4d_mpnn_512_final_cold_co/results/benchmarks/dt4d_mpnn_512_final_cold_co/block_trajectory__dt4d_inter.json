@@ -1,0 +1,51 @@
+{
+  "name": "dt4d_mpnn_512_final_cold_co",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/dt4d_mpnn_512_final_cold_co/models/final.pth",
+  "n_pairs": 200,
+  "depth": 6,
+  "stages": [
+    "input",
+    "block_0",
+    "block_1",
+    "block_2",
+    "block_3",
+    "block_4",
+    "block_5",
+    "pipeline"
+  ],
+  "sample_steps": 1,
+  "bp": null,
+  "dataset": {
+    "name": "Dt4d_r",
+    "type": "SparsePairDT4DDataset",
+    "phase": "test",
+    "inter_class": true,
+    "n_sparse": 512,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "geodesic"
+  },
+  "overrides": [
+    "datasets.test.inter_class=true"
+  ],
+  "mean_MGE": {
+    "input": 0.4771543572843075,
+    "block_0": 0.054983917865902183,
+    "block_1": 0.03472690676338971,
+    "block_2": 0.0350290962588042,
+    "block_3": 0.035492910780012606,
+    "block_4": 0.0341892100404948,
+    "block_5": 0.03345347070135176,
+    "pipeline": 0.03345347070135176
+  },
+  "median_MGE": {
+    "input": 0.47390396893024445,
+    "block_0": 0.04658255912363529,
+    "block_1": 0.025741941295564175,
+    "block_2": 0.02600998990237713,
+    "block_3": 0.025827499106526375,
+    "block_4": 0.0255193542689085,
+    "block_5": 0.025346833281219006,
+    "pipeline": 0.025346833281219006
+  }
+}

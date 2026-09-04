@@ -1,0 +1,67 @@
+{
+  "name": "faust_mpnn_512_final_cold_co",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/faust_mpnn_512_final_cold_co/models/final.pth",
+  "device": "cuda",
+  "n_pairs": 395,
+  "warmup": 5,
+  "dataset": {
+    "name": "Faust_r",
+    "type": "SparsePairFaustDataset",
+    "phase": "test",
+    "n_sparse": 512,
+    "exclude_self": false,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "geodesic"
+  },
+  "sample_steps": 50,
+  "n_sparse": 512,
+  "bp": {
+    "beta": 0.5,
+    "sigma": 0.02,
+    "g": 2.0,
+    "tau": 1.0,
+    "delta": 4.0,
+    "s": -2.0,
+    "sweeps": 40,
+    "k_cand": 10,
+    "k_graph": 12
+  },
+  "overrides": [
+    "diffusion.sample_steps=50",
+    "datasets.test.name=Faust_r",
+    "datasets.test.type=SparsePairFaustDataset",
+    "datasets.test.exclude_self=false"
+  ],
+  "mean_target_verts": 5000.39746835443,
+  "total": {
+    "mean_ms": 1523.9028683663169,
+    "sd_ms": 162.13748377595212,
+    "median_ms": 1509.4199944287539,
+    "iqr_ms": 295.5937497317791,
+    "min_ms": 1222.859786823392,
+    "max_ms": 1903.479591012001,
+    "n": 395
+  },
+  "phases": {
+    "match": {
+      "mean_ms": 1317.1418433702445,
+      "sd_ms": 159.77618568044994,
+      "median_ms": 1297.3681166768074,
+      "iqr_ms": 297.4838698282838,
+      "min_ms": 1035.6456600129604,
+      "max_ms": 1674.4103394448757,
+      "n": 395
+    },
+    "densify": {
+      "mean_ms": 206.76102499607242,
+      "sd_ms": 22.73300714187798,
+      "median_ms": 203.5732939839363,
+      "iqr_ms": 23.89029785990715,
+      "min_ms": 155.91744147241116,
+      "max_ms": 302.88263969123363,
+      "n": 395
+    }
+  },
+  "out_dir": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/faust_mpnn_512_final_cold_co/results/benchmarks/faust_mpnn_512_final_cold_co"
+}

@@ -1,0 +1,65 @@
+{
+  "name": "dt4d_mpnn_512_final_cold_co",
+  "checkpoint": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/dt4d_mpnn_512_final_cold_co/models/final.pth",
+  "device": "cuda",
+  "n_pairs": 1195,
+  "warmup": 5,
+  "dataset": {
+    "name": "Dt4d_r",
+    "type": "SparsePairDT4DDataset",
+    "phase": "test",
+    "inter_class": true,
+    "n_sparse": 512,
+    "ret_evecs": true,
+    "num_evecs": 200,
+    "fps_metric": "geodesic"
+  },
+  "sample_steps": 1,
+  "n_sparse": 512,
+  "bp": {
+    "beta": 0.5,
+    "sigma": 0.02,
+    "g": 2.0,
+    "tau": 1.0,
+    "delta": 4.0,
+    "s": -2.0,
+    "sweeps": 40,
+    "k_cand": 10,
+    "k_graph": 12
+  },
+  "overrides": [
+    "diffusion.sample_steps=1",
+    "datasets.test.inter_class=true"
+  ],
+  "mean_target_verts": 7996.27280334728,
+  "total": {
+    "mean_ms": 425.327826791665,
+    "sd_ms": 60.69613269828797,
+    "median_ms": 418.1288965046406,
+    "iqr_ms": 58.4667781367898,
+    "min_ms": 285.1014994084835,
+    "max_ms": 716.5483124554157,
+    "n": 1195
+  },
+  "phases": {
+    "match": {
+      "mean_ms": 57.865957106818215,
+      "sd_ms": 8.718345431370608,
+      "median_ms": 55.86838163435459,
+      "iqr_ms": 8.639978244900703,
+      "min_ms": 43.84934715926647,
+      "max_ms": 114.61810395121574,
+      "n": 1195
+    },
+    "densify": {
+      "mean_ms": 367.4618696848468,
+      "sd_ms": 59.339831233984114,
+      "median_ms": 360.94139888882637,
+      "iqr_ms": 55.633421055972576,
+      "min_ms": 235.11618748307228,
+      "max_ms": 653.2153841108084,
+      "n": 1195
+    }
+  },
+  "out_dir": "/data2/home/jrr25/Documents/shape-match-diffusion/experiments/final/dt4d_mpnn_512_final_cold_co/results/benchmarks/dt4d_mpnn_512_final_cold_co"
+}
