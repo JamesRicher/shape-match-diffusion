@@ -30,6 +30,10 @@ class MPNNDiffusionModel(BaseModel):
         self.schedule_s = cfg.get('schedule_s', 0.008)  # cosine schedule offset
         self.logsnr_shift = cfg.get('logsnr_shift', 0.0) # uniform log-SNR shift (nats); 0 = plain cosine
         self.sample_steps = cfg.get('sample_steps', 50) # reverse steps at inference
+        # DDIM stochasticity at inference: 0 = deterministic (default), 1 = DDPM. Distinct from
+        # `eta` above, which is the legacy logit_target smoothing. Config-settable so an eval can
+        # sweep it (--set diffusion.sample_eta=...); sample()'s argument still wins when passed.
+        self.sample_eta = cfg.get('sample_eta', 0.0)
         self.final_iters = cfg.get('final_iters', 20)   # Sinkhorn iters for the final DS snap
         self.reproject = cfg.get('reproject', False)    # DisPOSE style reprojection an additional two times per DDIM step
         self.ablate_features = cfg.get('ablate_features', False)
@@ -227,11 +231,17 @@ class MPNNDiffusionModel(BaseModel):
     # sampling / inference
     # ------------------------------------------------------------------ #
     @torch.no_grad()
-    def sample(self, F_x, F_y, D_x, D_y, steps=None, return_trajectory=False, sample_eta=0.0):
+    def sample(self, F_x, F_y, D_x, D_y, steps=None, return_trajectory=False, sample_eta=None):
         """DDIM (predict-x0) reverse process in logit space. Returns P0 (B, n_y, n_x),
         row-stochastic or doubly-stochastic per the projection mode.
+
+        sample_eta: DDIM stochasticity (0 deterministic, 1 DDPM). None takes the config's
+        diffusion.sample_eta, so validate_single and every reporting path pick it up; pass a
+        value to override per call. Note the final step never injects noise (sigma is 0 at
+        t_prev=0), so eta has no effect at steps=1.
         """
         steps = steps or self.sample_steps
+        sample_eta = self.sample_eta if sample_eta is None else sample_eta
         net = self.networks['denoiser']
         B, n = F_x.shape[0], F_x.shape[1]
         u = torch.randn(B, n, n, device=self.device)               # ᾱ(1)=0 prior
